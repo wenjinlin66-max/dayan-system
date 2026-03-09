@@ -1,0 +1,130 @@
+# LangGraph 执行器设计
+
+## 1. 目标
+Python 执行器负责把 `workflow-dsl.md` 中定义的 `execution_dag` 编译为可运行的 LangGraph 工作流，并支持：
+- 可恢复执行
+- 审批中断 / 恢复
+- 节点级错误处理
+- 草稿沙盒与正式发布双模式执行
+- 状态流式反馈
+
+## 2. 内部模块划分
+
+### 2.1 workflow_loader
+- 根据 `workflow_id + version + mode` 加载执行版本
+- 校验是否可执行（released 或 sandbox）
+- 返回标准化的 `WorkflowSpec`
+
+### 2.2 dag_compiler
+- 将 `execution_dag` 编译为 LangGraph 节点图
+- 建立节点依赖、entrypoint、异常跳转、子流程引用
+- 校验是否存在非法环路、缺失 handler、未定义入口
+
+### 2.3 state_store
+- 管理 `execution_runs`、checkpoint、timeline、运行态变量
+- 对接 LangGraph thread/checkpointer
+- 保证 `execution_id == thread_id`
+
+### 2.4 node_dispatcher
+- 根据节点 `type` 查找对应 handler
+- 负责注入标准上下文：
+  - execution context
+  - operator context
+  - dept scope
+  - memory accessors
+  - tool registry
+
+### 2.5 approval_manager
+- 在审批节点或高风险执行动作前发起中断
+- 写入审批运行态镜像
+- 等待恢复请求并继续执行
+
+### 2.6 event_bridge
+- 消费 Go -> Python 事件
+- 推送 Python -> 前端 SSE / WebSocket / 审计事件
+- 保证事件 envelope 与 execution state 同步
+
+### 2.7 error_router
+- 统一捕获 handler 错误
+- 根据节点配置跳转到 `exception` 节点或标记失败
+- 输出错误日志和补偿上下文
+
+## 3. LangGraph 状态模型
+建议执行状态对象至少包含：
+
+```json
+{
+  "execution_id": "exec_001",
+  "workflow_id": "wf_purchase_approval",
+  "workflow_version": 3,
+  "mode": "released",
+  "dept_id": "supply_chain",
+  "operator": {
+    "user_id": "u_001",
+    "roles": ["manager"]
+  },
+  "current_node": "decision_1",
+  "history": [],
+  "context": {},
+  "decision_outputs": {},
+  "tool_outputs": {},
+  "approval": null,
+  "metrics": {},
+  "errors": []
+}
+```
+
+## 4. 节点调度原则
+- `sensor_agent`：负责接收并标准化输入事件
+- `decision_agent`：输出结构化决策结果
+- `execution_agent`：调用工具或 Go API，必要时触发审批
+- `dialog_agent`：处理 ask / approve / command 三类入口
+- `monitor_agent`：输出监控结果或触发巡检
+- `condition`：只做分支判断
+- `parallel`：负责 fork/join 协调
+- `loop`：负责循环次数或退出条件
+- `subflow`：加载已发布子流程并执行
+- `wait`：挂起等待时间或外部信号
+- `approval`：触发 interrupt，等待 resume
+- `exception`：处理失败后的兜底逻辑
+
+## 5. handler 映射建议
+| node_type | handler | 说明 |
+|---|---|---|
+| sensor_agent | `handle_sensor_node` | 输入采集与标准化 |
+| decision_agent | `handle_decision_node` | 规则/模型/LLM 决策 |
+| execution_agent | `handle_execution_node` | 工具调用 / Go API 执行 |
+| dialog_agent | `handle_dialog_node` | 对话问答 / 命令解析 / 审批反馈 |
+| monitor_agent | `handle_monitor_node` | 巡检与监控输出 |
+| condition | `handle_condition_node` | 条件分支 |
+| parallel | `handle_parallel_node` | 并行 fork/join |
+| loop | `handle_loop_node` | 循环控制 |
+| subflow | `handle_subflow_node` | 子流程调度 |
+| wait | `handle_wait_node` | 等待定时/外部信号 |
+| approval | `handle_approval_node` | 人工审批中断 |
+| exception | `handle_exception_node` | 异常处理 |
+
+## 6. 执行生命周期
+```text
+load workflow -> build state -> compile graph -> invoke entrypoint
+-> dispatch node handlers -> checkpoint after key transitions
+-> interrupt if approval/wait needed -> resume -> continue
+-> success/fail/cancel -> emit final state
+```
+
+## 7. 中断与恢复规则
+- 审批节点必须持久化当前状态快照
+- `resume` 只能恢复 `waiting_approval` 或 `waiting_signal` 状态
+- 恢复请求必须带 `execution_id` 与合法的部门/操作人上下文
+- 恢复后必须记录 timeline 事件
+
+## 8. 异常恢复规则
+- handler 抛错时先检查节点是否声明 `on_error`
+- 若声明异常兜底节点，跳转执行该节点
+- 若未声明，则将 execution 标记为 failed
+- 所有失败都必须写入 `audit_logs` 与 `tool_run_logs`（如有）
+
+## 9. 运行时边界
+- LangGraph 只负责执行编排，不承载最终权限真相
+- 权限检查必须在入口 API、恢复 API、数据访问适配层中完成
+- 条件表达式真相以 Go 规则或统一编译产物为准，Python 不再发明第二套语义

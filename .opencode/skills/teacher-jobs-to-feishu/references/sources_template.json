@@ -1,0 +1,134 @@
+[
+  {
+    "name": "广东人事考试网",
+    "city": "广东",
+    "url": "http://rsks.gd.gov.cn/",
+    "type": "html"
+  },
+  {
+    "name": "广东省人社厅-事业单位公开招聘",
+    "city": "广东",
+    "url": "https://hrss.gd.gov.cn/zwgk/sydwzp/index.html",
+    "type": "html"
+  },
+  {
+    "name": "广州市教育局-人事工作",
+    "city": "广州",
+    "url": "https://jyj.gz.gov.cn/gk/zfxxgkml/qt/gs/rsgz/",
+    "type": "html"
+  },
+  {
+    "name": "广州市教育局-通知公告",
+    "city": "广州",
+    "url": "https://jyj.gz.gov.cn/yw/tzgg/",
+    "type": "html"
+  },
+  {
+    "name": "广州市人社局-人事考试",
+    "city": "广州",
+    "url": "http://rsj.gz.gov.cn/ywzt/rsks/",
+    "type": "html"
+  },
+  {
+    "name": "深圳市教育局-公告公示",
+    "city": "深圳",
+    "url": "http://szeb.sz.gov.cn/home/xxgk/flzy/gggs/index.html",
+    "type": "html"
+  },
+  {
+    "name": "深圳市考试院",
+    "city": "深圳",
+    "url": "http://hrss.sz.gov.cn/szksy/",
+    "type": "html"
+  },
+  {
+    "name": "东莞市教育局-教师管理",
+    "city": "东莞",
+    "url": "https://edu.dg.gov.cn/flfw/jsgl/",
+    "type": "html"
+  },
+  {
+    "name": "惠州市教育局-人事工作",
+    "city": "惠州",
+    "url": "https://jyj.huizhou.gov.cn/zwgk/rsgz/",
+    "type": "html"
+  },
+  {
+    "name": "惠州市教育局-首页",
+    "city": "惠州",
+    "url": "http://jyj.huizhou.gov.cn/",
+    "type": "html"
+  },
+  {
+    "name": "惠州市人社局",
+    "city": "惠州",
+    "url": "http://rsj.huizhou.gov.cn/",
+    "type": "html"
+  },
+  {
+    "name": "东莞市人社局-公开招聘",
+    "city": "东莞",
+    "url": "https://dghrss.dg.gov.cn/xwzx/gsgg/gkzp/index.html",
+    "type": "html"
+  },
+  {
+    "name": "深圳市人社局-人事考评",
+    "city": "深圳",
+    "url": "https://hrsspub.sz.gov.cn/nptmis/",
+    "type": "html"
+  },
+  {
+    "name": "深圳市宝安区教育局",
+    "city": "深圳",
+    "url": "http://www.baoan.gov.cn/jyj/",
+    "type": "html"
+  },
+  {
+    "name": "深圳市宝安区教育局-人员招聘",
+    "city": "深圳",
+    "url": "http://www.baoan.gov.cn/jyj/zwgk/rsxx/ryzp/",
+    "type": "html"
+  },
+  {
+    "name": "深圳市龙岗区教育局",
+    "city": "深圳",
+    "url": "https://www.lg.gov.cn/lgjyj/",
+    "type": "html"
+  },
+  {
+    "name": "深圳市南山区教育局",
+    "city": "深圳",
+    "url": "http://www.szns.gov.cn/nsqjyj/",
+    "type": "html"
+  },
+  {
+    "name": "深圳市福田区教育局",
+    "city": "深圳",
+    "url": "http://www.szft.gov.cn/bmxx/qjyj/",
+    "type": "html"
+  },
+  {
+    "name": "广州市天河区政府",
+    "city": "广州",
+    "url": "http://www.thnet.gov.cn/",
+    "type": "html"
+  },
+  {
+    "name": "广州市白云区政府",
+    "city": "广州",
+    "url": "http://www.by.gov.cn/",
+    "type": "html"
+  },
+  {
+    "name": "广州市番禺区政府",
+    "city": "广州",
+    "url": "http://www.panyu.gov.cn/",
+    "type": "html"
+  },
+  {
+    "name": "惠州市惠城区政府",
+    "city": "惠州",
+    "url": "http://www.hcq.gov.cn/",
+    "type": "html"
+  }
+]

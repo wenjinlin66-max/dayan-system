@@ -1,0 +1,2 @@
+class ConditionNodeHandler:
+    pass

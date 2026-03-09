@@ -1,0 +1,40 @@
+project_path: D:\MaxwellProjects\AGV_WPT_Base.aedt
+design_name: AGV_WPT_Base
+setup_name: Setup1
+solution_type: EddyCurrent
+frequency: 85kHz
+topology: circular
+
+variables:
+  turns: 12
+  coil_gap_cm: 6cm
+  f_op: 85kHz
+  wire_d_mm: 1.2mm
+  coil_radius_mm: 30mm
+  coil_height_mm: 4mm
+
+geometry:
+  tx_name: tx_coil
+  rx_name: rx_coil
+  air_name: air_region
+  tx_origin: [0, 0, 0]
+  rx_origin: [0, 0, coil_gap_cm]
+  orientation: Z
+  air_region_pad_percent: [100, 100, 100, 100, 150, 150]
+
+materials:
+  tx: copper
+  rx: copper
+  air: air
+
+excitation:
+  mode: current_density
+  tx_name: J_TX
+  rx_name: J_RX
+  tx_jz: 1A_per_meter_sq
+  rx_jz: -1A_per_meter_sq
+
+boundaries:
+  radiation_name: RAD1
+
+exports: [L1, L2, M, k]
