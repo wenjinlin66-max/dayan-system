@@ -69,7 +69,6 @@ python-agent-service/
 │  │  │  ├─ decision.py
 │  │  │  ├─ execution.py
 │  │  │  ├─ dialog.py
-│  │  │  ├─ monitor.py
 │  │  │  ├─ condition.py
 │  │  │  ├─ parallel.py
 │  │  │  ├─ loop.py
@@ -151,6 +150,11 @@ python-agent-service/
 - `checkpoints/`：checkpoint 适配层
 - `events/`：事件消费与状态推送
 
+说明：
+- `monitor/` 领域和监控工作台 API 仍存在
+- 但监控型智能体本体不应作为普通 runtime handler 实现
+- 监控型智能体应以后续控制平面服务方式落地
+
 ### 3.7 `app/integrations/`
 - 所有外部依赖适配器
 - 包括 Go API、工具系统、LLM、RAG、嵌入模型
@@ -212,6 +216,8 @@ python-agent-service/
 6. `runtime/handlers/sensor.py` / `decision.py` / `execution.py` / `approval.py`
 7. `api/v1/workflows.py` + `api/v1/executions.py`
 8. `runtime/events/consumer.py` + `events/publisher.py`
+
+监控型智能体不纳入第一阶段 runtime handler 列表，后续按独立监控子系统实现。
 
 ## 7. 后续扩展位点
 - 增加更多工具执行器：`integrations/tools/executors/`

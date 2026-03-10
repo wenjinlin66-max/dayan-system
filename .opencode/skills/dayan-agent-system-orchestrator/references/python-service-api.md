@@ -30,6 +30,8 @@ Python 服务对外提供 5 类能力：
 - `POST /api/v1/chat/sessions/:session_id/messages`
 - `GET /api/v1/chat/sessions/:session_id/messages`
 - `GET /api/v1/chat/sessions/:session_id/approvals`
+- `GET /api/v1/chat/workflows/catalog`
+- `POST /api/v1/chat/route`
 
 ### 2.4 Monitor API
 - `GET /api/v1/monitor/executions`
@@ -82,3 +84,7 @@ Python 服务对外提供 5 类能力：
 - 前端对话工作台：主要调用 Chat API 与部分 Execution API
 - 前端监控工作台：主要调用 Monitor API
 - Go 后端：主要通过 Redis 事件与 Python 交互，必要时调用 Execution / Resume 接口
+
+### 6.1 对话型智能体补充说明
+- `chat/workflows/catalog`：返回当前部门与当前账号可见的 workflow 目录
+- `chat/route`：返回 `ask / approve / command` 的路由结果，不直接绕过 registry 执行 workflow

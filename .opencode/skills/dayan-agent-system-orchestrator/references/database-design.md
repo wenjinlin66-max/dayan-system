@@ -12,9 +12,16 @@
 | workflow_versions | 工作流版本表 | AI 中枢 | 包含 draft/released |
 | workflow_node_configs | 节点配置快照 | AI 中枢 | 可选，供拆分存储 |
 | agent_configs | 智能体配置 | AI 中枢 | |
+| sensor_subscriptions | 感知订阅配置 | AI 中枢 | 第一阶段重点 |
+| sensor_event_inbox | 感知事件入箱 | AI 中枢 | 第一阶段重点 |
+| decision_rule_sets | 决策规则集 | AI 中枢 | 决策型智能体 |
+| decision_model_registry | 决策模型注册表 | AI 中枢 | 决策型智能体 |
+| execution_target_registry | 执行目标注册表 | AI 中枢 | 执行型智能体 |
+| workflow_registry | workflow 调用目录 | AI 中枢 | 对话型智能体 |
 | execution_runs | 流程执行实例 | AI 中枢 | |
 | execution_checkpoints | 执行 checkpoint 索引 | AI 中枢 | 对接 LangGraph |
 | approval_tasks | 审批运行态镜像 | AI 中枢 | 非审批主记录 |
+| incidents | 监控事件聚合单 | AI 中枢 | 监控型智能体 |
 | audit_logs | 审计日志 | AI 中枢 | |
 | agent_memories | 历史执行记忆 | AI 中枢 | |
 | rag_docs_index | 知识索引元数据 | AI 中枢 | |
@@ -114,6 +121,26 @@
 | decided_at | timestamptz | 否 | null |  | 审批完成时间 |
 | created_at | timestamptz | 是 | now() |  | |
 
+### incidents
+| 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
+|---|---|---|---|---|---|
+| id | uuid | 是 |  | PK | incident 主键 |
+| dept_id | varchar(64) | 否 | null | index | 部门口径 |
+| execution_id | uuid | 否 | null | index | 关联 execution |
+| workflow_id | uuid | 否 | null | index | 关联 workflow |
+| incident_type | varchar(64) | 是 |  | index | timeout/consistency/compliance/health/exception |
+| severity | varchar(32) | 是 | medium | index | low/medium/high/critical |
+| scope | varchar(64) | 是 | execution | index | system/workflow/execution/step |
+| owner_type | varchar(32) | 否 | null |  | role/user/system |
+| owner_id | varchar(64) | 否 | null | index | 责任人/角色 |
+| dedup_key | varchar(255) | 是 |  | unique | 去重键 |
+| status | varchar(32) | 是 | open | index | open/acknowledged/escalated/resolved/cancelled |
+| summary | text | 是 |  |  | 摘要 |
+| payload | jsonb | 否 | null |  | 详情 |
+| escalation_at | timestamptz | 否 | null |  | 升级时间 |
+| resolved_at | timestamptz | 否 | null |  | 解决时间 |
+| created_at | timestamptz | 是 | now() | index | |
+
 ### agent_configs
 | 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
 |---|---|---|---|---|---|
@@ -126,6 +153,104 @@
 | status | varchar(32) | 是 | active | index | active/inactive |
 | created_at | timestamptz | 是 | now() |  | |
 | updated_at | timestamptz | 是 | now() |  | |
+
+### decision_rule_sets
+| 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
+|---|---|---|---|---|---|
+| id | uuid | 是 |  | PK | 规则集主键 |
+| dept_id | varchar(64) | 是 |  | index | 部门隔离 |
+| code | varchar(128) | 是 |  | unique | 规则集编码 |
+| name | varchar(255) | 是 |  |  | 规则集名称 |
+| status | varchar(32) | 是 | active | index | active/inactive |
+| rules | jsonb | 是 |  |  | 规则内容 |
+| created_at | timestamptz | 是 | now() |  | |
+| updated_at | timestamptz | 是 | now() |  | |
+
+### decision_model_registry
+| 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
+|---|---|---|---|---|---|
+| id | uuid | 是 |  | PK | 模型主键 |
+| dept_id | varchar(64) | 是 |  | index | 部门隔离 |
+| model_type | varchar(64) | 是 |  | index | optimization/ml/forecast |
+| code | varchar(128) | 是 |  | unique | 模型编码 |
+| name | varchar(255) | 是 |  |  | 模型名称 |
+| config | jsonb | 是 |  |  | 模型参数与说明 |
+| status | varchar(32) | 是 | active | index | active/inactive |
+| created_at | timestamptz | 是 | now() |  | |
+| updated_at | timestamptz | 是 | now() |  | |
+
+### execution_target_registry
+| 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
+|---|---|---|---|---|---|
+| id | uuid | 是 |  | PK | 执行目标主键 |
+| dept_id | varchar(64) | 否 | null | index | 部门范围 |
+| target_type | varchar(64) | 是 |  | index | go_api/feishu/email/device/file/mcp |
+| code | varchar(128) | 是 |  | unique | 目标编码 |
+| name | varchar(255) | 是 |  |  | 目标名称 |
+| config | jsonb | 是 |  |  | 目标配置 |
+| status | varchar(32) | 是 | active | index | active/inactive |
+| created_at | timestamptz | 是 | now() |  | |
+| updated_at | timestamptz | 是 | now() |  | |
+
+### workflow_registry
+| 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
+|---|---|---|---|---|---|
+| id | uuid | 是 |  | PK | 注册主键 |
+| workflow_id | uuid | 是 |  | index | 所属 workflow |
+| workflow_version | int | 是 |  | index | 发布版本 |
+| dept_id | varchar(64) | 是 |  | index | 所属部门 |
+| category | varchar(64) | 是 |  | index | 职能分类 |
+| title | varchar(255) | 是 |  |  | 展示标题 |
+| summary | text | 是 |  |  | 简介 |
+| synonyms | jsonb | 否 | null |  | 同义词 |
+| example_utterances | jsonb | 否 | null |  | 示例表达 |
+| allowed_roles | jsonb | 否 | null |  | 允许角色 |
+| required_inputs | jsonb | 否 | null |  | 必填参数 |
+| input_schema | jsonb | 否 | null |  | 参数 schema |
+| approval_policy | varchar(64) | 是 | risk_based |  | 审批策略 |
+| risk_level | varchar(32) | 是 | medium |  | 风险等级 |
+| output_contract | jsonb | 否 | null |  | 输出契约 |
+| status | varchar(32) | 是 | active | index | active/inactive |
+| created_at | timestamptz | 是 | now() |  | |
+| updated_at | timestamptz | 是 | now() |  | |
+
+### sensor_subscriptions
+| 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
+|---|---|---|---|---|---|
+| id | uuid | 是 |  | PK | 订阅主键 |
+| workflow_id | uuid | 是 |  | index | 所属 workflow |
+| workflow_version | int | 是 |  | index | 所属版本 |
+| node_id | varchar(128) | 是 |  | unique(workflow_id, workflow_version, node_id) | 对应感知节点 |
+| dept_id | varchar(64) | 是 |  | index | 部门隔离 |
+| enabled | boolean | 是 | true | index | 是否启用 |
+| source_type | varchar(32) | 是 | form_change | index | form_change/iot/third_party_notice/supply_chain_event/schedule |
+| source_system | varchar(128) | 是 |  | index | 来源系统 |
+| source_table | varchar(128) | 否 | null | index | 来源表 |
+| source_event_key | varchar(255) | 是 |  | index | 事件源标识 |
+| selected_fields | jsonb | 是 | '[]' |  | 关注字段 |
+| condition_logic | varchar(16) | 是 | and |  | and/or |
+| conditions | jsonb | 是 | '[]' |  | 条件数组 |
+| output_event_name | varchar(255) | 是 |  |  | 输出事件名 |
+| output_mapping | jsonb | 否 | null |  | 输出映射 |
+| pass_raw_payload | boolean | 是 | true |  | 是否透传原始 payload |
+| created_at | timestamptz | 是 | now() |  | |
+| updated_at | timestamptz | 是 | now() |  | |
+
+### sensor_event_inbox
+| 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
+|---|---|---|---|---|---|
+| id | uuid | 是 |  | PK | 事件入箱主键 |
+| event_id | varchar(128) | 是 |  | unique | 上游事件 ID |
+| event_type | varchar(128) | 是 |  | index | 事件类型 |
+| source_system | varchar(128) | 是 |  | index | 来源系统 |
+| source_table | varchar(128) | 否 | null | index | 来源表 |
+| source_event_key | varchar(255) | 是 |  | index | 来源事件键 |
+| dept_id | varchar(64) | 是 |  | index | 部门隔离 |
+| payload | jsonb | 是 |  |  | 原始事件 payload |
+| matched_subscription_ids | jsonb | 否 | null |  | 命中的订阅 |
+| processing_status | varchar(32) | 是 | pending | index | pending/matched/dispatched/ignored/failed |
+| error_message | text | 否 | null |  | 错误信息 |
+| received_at | timestamptz | 是 | now() | index | 接收时间 |
 
 ### agent_memories
 | 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
@@ -165,6 +290,10 @@
 | last_message_at | timestamptz | 否 | null | index | 最近消息时间 |
 | created_at | timestamptz | 是 | now() |  | |
 
+约束说明：
+- 同部门可有多个用户会话
+- 权限相同不代表记录共享，聊天记录必须按用户隔离
+
 ### chat_messages
 | 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
 |---|---|---|---|---|---|
@@ -177,6 +306,20 @@
 | payload | jsonb | 否 | null |  | 多模态内容或卡片 |
 | related_execution_id | uuid | 否 | null | index | 关联执行 |
 | created_at | timestamptz | 是 | now() |  | |
+
+推荐扩展字段：
+- `route_type`：ask/approve/command
+- `workflow_registry_match`：命中的 workflow 候选
+- `message_provenance`：text/voice/pdf/image/ocr
+
+### department_grants（建议后续补充）
+| 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
+|---|---|---|---|---|---|
+| id | uuid | 是 |  | PK | 授权主键 |
+| dept_id | varchar(64) | 是 |  | index | 部门 |
+| workflow_id | uuid | 是 |  | index | workflow |
+| allowed_roles | jsonb | 否 | null |  | 允许角色 |
+| policy | jsonb | 否 | null |  | 附加策略 |
 
 ### tool_run_logs
 | 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
@@ -233,6 +376,11 @@
 - `execution_id` 与 LangGraph `thread_id` 一一对应
 - `approval_tasks.go_approval_id` 全局唯一
 - 所有跨部门可见数据必须显式受 `dept_id` 过滤
+- `sensor_subscriptions` 必须绑定 `workflow_id + workflow_version + node_id`
+- `sensor_event_inbox.event_id` 必须全局唯一，避免重复消费
+- `workflow_registry` 只能登记已发布 workflow version
+- `chat_sessions` 与 `chat_messages` 必须同时绑定 `dept_id + user_id` 语境
+- 同部门用户可同权，但其消息、审批、操作记录不得混写
 
 ## 5. 隔离字段设计
 - dept_id
@@ -241,6 +389,10 @@
 ## 5.1 推荐索引
 - `workflow_versions (workflow_id, version)`
 - `workflow_versions (workflow_id, is_current_release)`
+- `sensor_subscriptions (source_event_key, enabled)`
+- `sensor_subscriptions (workflow_id, workflow_version, node_id)`
+- `sensor_event_inbox (event_type, received_at)`
+- `sensor_event_inbox (source_event_key, processing_status)`
 - `execution_runs (workflow_id, workflow_version, status)`
 - `execution_runs (dept_id, status, started_at)`
 - `approval_tasks (go_approval_id)`
@@ -250,7 +402,7 @@
 
 ## 6. 迁移策略
 - 先建基础主表：workflows、workflow_versions、execution_runs、approval_tasks
-- 第二批建支撑表：agent_memories、chat_sessions、chat_messages、tool_run_logs、audit_logs、monitor_snapshots
+- 第二批建支撑表：sensor_subscriptions、sensor_event_inbox、agent_memories、chat_sessions、chat_messages、tool_run_logs、audit_logs、monitor_snapshots
 - 所有新增枚举值优先用 varchar + 约束控制，避免过早强绑定数据库 enum
 - JSONB 字段优先用于高变结构：ui_schema、execution_dag、payload、snapshot、metadata
 
