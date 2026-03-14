@@ -1,6 +1,8 @@
+import json
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import cast
 
 
 def _get_bool(name: str, default: bool) -> bool:
@@ -29,6 +31,12 @@ class Settings:
     pgpassword: str = os.getenv("PGPASSWORD", "postgres")
     pgdatabase: str = os.getenv("PGDATABASE", "dayan_agentic2")
 
+    mock_pghost: str = os.getenv("MOCK_PGHOST", os.getenv("PGHOST", "localhost"))
+    mock_pgport: int = _get_int("MOCK_PGPORT", _get_int("PGPORT", 55432))
+    mock_pguser: str = os.getenv("MOCK_PGUSER", os.getenv("PGUSER", "postgres"))
+    mock_pgpassword: str = os.getenv("MOCK_PGPASSWORD", os.getenv("PGPASSWORD", "postgres"))
+    mock_pgdatabase: str = os.getenv("MOCK_PGDATABASE", "dayan_mock_records")
+
     redis_host: str = os.getenv("REDIS_HOST", "localhost")
     redis_port: int = _get_int("REDIS_PORT", 56379)
     redis_password: str = os.getenv("REDIS_PASSWORD", "")
@@ -40,7 +48,12 @@ class Settings:
     s3_bucket: str = os.getenv("S3_BUCKET", "dayan-agent-files")
     s3_region: str = os.getenv("S3_REGION", "us-east-1")
 
-    default_llm_provider: str = os.getenv("DEFAULT_LLM_PROVIDER", "deepseek")
+    default_llm_provider: str = os.getenv("DEFAULT_LLM_PROVIDER", "gemini_proxy")
+    llm_api_key: str = os.getenv("LLM_API_KEY", "")
+    llm_base_url: str = os.getenv("LLM_BASE_URL", "")
+    llm_model: str = os.getenv("LLM_MODEL", "gemini-3-flash-preview-thinking")
+    llm_request_path: str = os.getenv("LLM_REQUEST_PATH", "/chat/completions")
+    llm_timeout_ms: int = _get_int("LLM_TIMEOUT_MS", 30000)
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "")
     embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "local")
@@ -54,6 +67,11 @@ class Settings:
     workflow_default_mode: str = os.getenv("WORKFLOW_DEFAULT_MODE", "released")
     enable_sandbox_mode: bool = _get_bool("ENABLE_SANDBOX_MODE", True)
     scheduler_enabled: bool = _get_bool("SCHEDULER_ENABLED", True)
+    go_records_base_url: str = os.getenv("GO_RECORDS_BASE_URL", "")
+    go_records_timeout_ms: int = _get_int("GO_RECORDS_TIMEOUT_MS", 8000)
+    runtime_default_tenant_id: str = os.getenv("RUNTIME_DEFAULT_TENANT_ID", "tenant_local")
+    enable_mock_records_gateway: bool = _get_bool("ENABLE_MOCK_RECORDS_GATEWAY", True)
+    department_table_route_map_json: str = os.getenv("DEPARTMENT_TABLE_ROUTE_MAP_JSON", "{}")
 
     @property
     def database_url(self) -> str:
@@ -63,9 +81,52 @@ class Settings:
         )
 
     @property
+    def mock_database_url(self) -> str:
+        return (
+            f"postgresql+asyncpg://{self.mock_pguser}:{self.mock_pgpassword}"
+            f"@{self.mock_pghost}:{self.mock_pgport}/{self.mock_pgdatabase}"
+        )
+
+    @property
     def redis_url(self) -> str:
         auth = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"
+
+    @property
+    def department_table_route_map(self) -> dict[str, dict[str, str]]:
+        try:
+            data = cast(object, json.loads(self.department_table_route_map_json))
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        normalized: dict[str, dict[str, str]] = {}
+        raw_items = cast(dict[object, object], data)
+        for target_code, config in raw_items.items():
+            if not isinstance(target_code, str) or not isinstance(config, dict):
+                continue
+            normalized[target_code] = {
+                key: str(value)
+                for key, value in cast(dict[object, object], config).items()
+                if isinstance(key, str) and value is not None
+            }
+        return normalized
+
+    @property
+    def resolved_llm_api_key(self) -> str:
+        if self.llm_api_key:
+            return self.llm_api_key
+        if self.default_llm_provider == "deepseek":
+            return self.deepseek_api_key
+        return ""
+
+    @property
+    def resolved_llm_base_url(self) -> str:
+        if self.llm_base_url:
+            return self.llm_base_url.rstrip("/")
+        if self.default_llm_provider == "deepseek" and self.deepseek_base_url:
+            return self.deepseek_base_url.rstrip("/")
+        return ""
 
 
 @lru_cache

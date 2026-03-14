@@ -1,1 +1,1 @@
-"""Chat domain package."""
+"""Chat domain services."""

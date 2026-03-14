@@ -5,7 +5,7 @@ from app.db.base import Base
 
 
 class ApprovalTask(Base):
-    __tablename__ = "approval_tasks"
+    __tablename__: str = "approval_tasks"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     go_approval_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
