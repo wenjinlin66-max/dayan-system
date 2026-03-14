@@ -376,7 +376,7 @@ data: {"execution_id":"exec_001","status":"running","current_node":"execution_ag
 - 若感知未命中，execution 允许以“无下游继续执行”的方式平滑结束，但 `final_output.sensor_outputs` 必须保留本次来源匹配/条件匹配结果
 
 ### B. Mock Records Gateway（验证对话型查询 + 执行型增删改）
-- Python 本地增加 `mock records gateway` 适配层，模拟 Go 泛型 records API 的响应
+- Python 本地增加 `mock records gateway` / `records API` 临时测试层，模拟 Go 泛型 records API 的响应
 - query/create/update/delete 的请求结构、响应结构、错误码与幂等规则必须尽量与正式 Go API 对齐
 - 适用于验证：对话型查询、执行型写入、审批恢复后执行、结果回传、审计留痕
 
@@ -391,6 +391,7 @@ data: {"execution_id":"exec_001","status":"running","current_node":"execution_ag
 - 通过 `/api/v1/records/*` 修改记录时，Python 会自动生成 `record.created / record.updated / record.deleted` 事件并写入 `sensor_change_log`
 - 事件会按 `source_system=dayan_mock_records + table_name + event_type` 匹配已发布 workflow 中的 `sensor_agent`，若命中则直接触发 execution
 - 该层属于临时测试设施；Go 正式 records 能力接入后应整体删除，不作为正式产品模块保留
+- 当前 `/api/v1/records/events/recent` 主要返回：`changed_fields / triggered_execution_ids / created_at`，尚未直接暴露 `source_matched / condition_matched / 写回结果摘要`
 
 结论：
 - 早期开发不要等 Go 数据库直连完成后再验证 workflow

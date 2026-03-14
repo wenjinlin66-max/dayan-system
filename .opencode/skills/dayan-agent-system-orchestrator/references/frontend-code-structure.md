@@ -37,11 +37,6 @@ agent-collab-module/
 │  │  │  ├─ ExecutionTable.vue
 │  │  │  ├─ DeadletterTable.vue
 │  │  │  └─ AlertPanel.vue
-│  │  ├─ records/
-│  │  │  ├─ RecordsSourceSidebar.vue
-│  │  │  ├─ RecordsGrid.vue
-│  │  │  ├─ RecordEditorDialog.vue
-│  │  │  └─ RecordsEventTimeline.vue
 │  │  ├─ layout/
 │  │  │  └─ WorkspaceTopNav.vue
 │  │  └─ shared/
@@ -263,6 +258,7 @@ agent-collab-module/
 - `router/agentCollab.ts` 已注册 `/records-workbench`
 - `RecordsWorkbenchPage.vue` 已实现首版三栏布局：左侧选表、中间真实表格、右侧最近事件流
 - `api/records.ts` 与 `store/records.ts` 已落地，支持表列表、schema、行列表、创建、编辑、删除、最近事件刷新
+- 当前页面仍是单文件集成实现，`components/records/*` 目录尚未拆出；后续若继续演进再做组件细分
 
 ## 5. 与后端契约的直接映射
 - `api/workflows.ts` 对接 workflow 草稿/编译/发布/版本接口

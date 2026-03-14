@@ -574,3 +574,6 @@
 
 ## 7. 待确认项
 - 
+当前实现说明：
+- `sensor_subscriptions` / `sensor_event_inbox` 仍属于目标架构表设计，当前代码尚未创建这些表
+- 当前临时测试链路以 `sensor_change_log` + 直接触发 execution 的方式支撑 mock records 联调

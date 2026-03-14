@@ -69,6 +69,9 @@
 - 进一步定案：该 Mock 数据库、业务表格区与 `app/mock_records/` 都只是测试过渡层；Go 端正式表格能力接入后应整体删除
 - Mock Records 第一批代码已落地：独立数据库连接、自动建库/建表/种子数据、`/api/v1/records/*`、顶部导航中的业务表格区、`RecordsWorkbenchPage.vue`
 - 当前已可在前端查看三张测试业务表，并通过后端记录修改事件流验证感知型联调闭环
+- 本轮代码收尾已完成：Mock Records 相关 Python 重点文件的 basedpyright warning 已清理，前端 Vite 构建已增加 vendor 分包并压掉 chunk warning
+- 浏览器级联调验证已完成：可从顶部导航进入业务表格区，新增记录成功后可看到新记录文本与 `record.created` 事件文本，页面无前端报错
+- 已补文档-代码对齐收尾：将 mock records/records workbench 的“目标拆分结构”与“当前已实现结构”区分开，避免 reference 超前描述实现状态
 
 ## 进行中模块
 - 感知型智能体详细设计（数据库实时感知优先）
@@ -132,6 +135,7 @@
 - 继续把 `sensor-metadata` 从当前后端内置目录推进到真实 Go/数据库元数据同步来源，减少 mock 目录占比
 - 输出 `dayan_mock_records` 的落地实施文档，并继续从“方案设计”推进到“Python Mock Records API + 业务表格测试工作台 + 事件桥”的真实开发，同时保留后续整体删除计划
 - 继续把当前 RecordsWorkbench 从页面骨架推进到更完整的列筛选、字段校验、执行写回展示，并补与 `department_table` 的默认映射示例
+- 如需进一步收尾，可继续把项目范围内其他历史存量 basedpyright warning 做分批治理；当前新增/近期关键文件已完成 warning 清理
 - 将对话型智能体“选 workflow + 触发 execution”的主链继续细化到可开发级
 - 将数据库设计文档改造成“按功能分类 + 按开发步骤索引”的结构，方便后续按 skill 阶段快速定位表
 - 基于 `go-python-contracts-v1.md` 将 records/query/error/auth/event/approval/mock 细化到实现级与测试级
@@ -221,3 +225,4 @@
 - python-environment-config.md：已同步 `MOCK_PG*` 环境变量口径
 - python-service-api.md：已同步 Mock Records API 与当前自动建库/建表/事件触发行为
 - mock-records-architecture.md：已同步第一批真实实现状态
+- progress-tracker.md：已补记录本轮 warning 清理与构建优化状态
