@@ -6,6 +6,7 @@
 - LangGraph 工作流执行器
 - workflow 定义 / 版本 / 发布管理
 - 对话入口、审批恢复、监控查询
+- 独立 Mock Records 业务库联调层
 - 三级记忆与工具调用扩展
 
 ## 2. 推荐目录树
@@ -61,6 +62,13 @@ python-agent-service/
 │  │     ├─ history.py
 │  │     ├─ knowledge.py
 │  │     └─ service.py
+│  ├─ mock_records/
+│  │  ├─ api/
+│  │  ├─ schemas/
+│  │  ├─ service/
+│  │  ├─ repository/
+│  │  ├─ db/
+│  │  └─ fixtures/
 │  ├─ runtime/
 │  │  ├─ graph_builder.py
 │  │  ├─ dispatcher.py
@@ -163,6 +171,18 @@ python-agent-service/
 ### 3.8 `app/db/`
 - ORM 模型、session、迁移
 - 与 domain.repository 配合
+
+### 3.8.1 `app/mock_records/`
+- 独立于 Python 主库的 Mock 业务数据库联调层
+- 负责 `dayan_mock_records` 的表读取、写入、元数据查询、事件桥接
+- 不承载 workflow / execution / approval / chat 真相数据
+- 未来接 Go 正式 records API 时，此目录应整体删除，而不是继续长期保留
+
+当前已落地的第一批目录职责：
+- `app/mock_records/db/`：独立 Declarative Base、Mock 表模型、启动种子初始化
+- `app/mock_records/repository/records_repository.py`：三张测试业务表与最近事件日志的读写
+- `app/mock_records/service/records_service.py`：表 CRUD、最近事件、改表触发 workflow execution
+- `app/api/v1/records.py`：临时测试层 HTTP API
 
 ### 3.9 `app/tests/`
 - `unit/`：纯逻辑测试

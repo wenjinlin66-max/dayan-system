@@ -111,3 +111,14 @@
 - 先支持基础 summary / payload 写入
 - 先支持 RAG 索引元数据，不强制完成向量召回细节
 - 后续再增加重排序、引用、质量评估
+
+## 9. 当前已落地的 runtime 级记忆实现
+- `ContextMemoryAccessor` 已支持：`get_context / set_context / append_context_event`
+- `HistoryMemoryAccessor` 已支持：`search_history / write_history`
+- `KnowledgeMemoryAccessor` 已支持：`search_knowledge / fetch_document`
+- `MemoryService.bind_runtime(state)` 已可为运行时 handler 提供统一记忆入口
+
+当前阶段说明：
+- 这些 accessor 当前以 `RuntimeState` 为底座，属于 execution 内与本地运行态级实现
+- `history_memories`、`knowledge_docs` 当前先挂在 runtime state / input payload 上，目的是先把 handler 的记忆调用模式固定下来
+- 后续再把历史记忆落到真实表、把知识检索接到 RAG 索引层

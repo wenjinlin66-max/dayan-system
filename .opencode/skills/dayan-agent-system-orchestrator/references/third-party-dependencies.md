@@ -12,6 +12,7 @@
 
 用途：
 - PostgreSQL 作为 Python 智能体协同模块主数据库
+- PostgreSQL 另建独立数据库 `dayan_mock_records` 作为 Mock 业务表联调底座
 - pgvector 作为向量检索能力扩展，用于后续 RAG 能力接入
 
 核心选型理由：
@@ -19,19 +20,21 @@
 - 减少基础设施数量，降低运维与数据同步复杂度
 
 ### 1.2 大模型 API
-- 当前默认：DeepSeek API
-- 可替换候选：Gemini / ChatGPT / 其他兼容模型服务
+- 当前默认：Gemini 中转站（OpenAI-compatible API）
+- 可替换候选：DeepSeek / ChatGPT / 其他兼容模型服务
 
 凭据注入方式：
 - 使用环境变量，不在 skill / 代码 / 文档中保存明文密钥
-- 推荐变量名：`DEEPSEEK_API_KEY`
-- 推荐变量名：`DEEPSEEK_BASE_URL`（如需）
-- 推荐变量名：`DEFAULT_LLM_PROVIDER=deepseek`
+- 推荐变量名：`LLM_API_KEY`
+- 推荐变量名：`LLM_BASE_URL`
+- 推荐变量名：`LLM_MODEL`
+- 推荐变量名：`LLM_REQUEST_PATH=/chat/completions`
+- 推荐变量名：`DEFAULT_LLM_PROVIDER=gemini_proxy`
 
 约束：
 - 模型层必须做成可替换适配器，不得把业务逻辑写死到单一厂商 SDK
 - 决策型/对话型智能体调用模型时，应通过统一 LLM client 层接入
-- 当前运行方式：DeepSeek 走在线 API
+- 当前运行方式：Gemini 通过 OpenAI-compatible 中转站网关接入
 
 ### 1.3 Python 基础框架
 - FastAPI
@@ -161,14 +164,22 @@
 - 采用“工具注册表 + 适配器”模式
 - MCP 工具作为一类 adapter 接入
 - 第三方 API、Go 泛型 API、文件处理能力统一抽象为 tool executors
+- 部门表格写入能力统一抽象为 `department_table` 执行目标，并通过 tool executor / adapter 路线接入具体表格载体
 
 推荐实现：
 - `tool registry` 统一注册
 - `executors/` 按工具类别拆分
 - workflow / execution_agent 只依赖统一工具接口，不直接耦合具体 SDK
 
+当前实现推进：
+- `ToolRegistry.build_default()` 已落地为当前默认入口
+- `department_table` 当前通过 `DepartmentTableExecutor` 接入
+- adapter 支持两条路径：Go `records API` / `MockRecordsGateway`
+- 对于前端真实业务表格联调，当前再增加一条独立底座：`dayan_mock_records` + Python Mock Records API
+
 核心选型理由：
 - 方便后续扩展飞书、邮件、审批、文件处理等能力
+- 方便按部门路由到不同表格资源，同时避免在 execution_agent 中写死某个表格厂商
 - 降低 execution_agent 与外部服务的耦合
 
 ### 1.10 Office 文档处理

@@ -30,13 +30,169 @@
 | tool_run_logs | 工具执行轨迹 | AI 中枢 | |
 | monitor_snapshots | 监控快照 | AI 中枢 | |
 
-## 2.1 工作流版本原则
+## 2.1 按功能分类的表清单
+
+### A. 工作流定义与发布
+- `workflows`：工作流主档案
+- `workflow_versions`：工作流草稿/发布版/沙盒版
+- `workflow_node_configs`：节点配置拆分存储（可选）
+
+适用场景：
+- 画布搭建 workflow
+- workflow 保存、编译、发布、查历史版本
+
+### B. 运行时执行与恢复
+- `execution_runs`：每次 workflow 实际执行记录
+- `execution_checkpoints`：执行中断/恢复 checkpoint
+- `approval_tasks`：审批运行态镜像
+
+适用场景：
+- workflow 启动
+- 执行中断
+- 审批恢复
+- 查看执行结果
+
+### C. 感知型智能体
+- `sensor_subscriptions`：感知订阅规则
+- `sensor_event_inbox`：上游事件入箱
+
+适用场景：
+- 配置数据库/事件感知节点
+- 事件去重、匹配、分发
+
+### D. 决策型智能体
+- `decision_rule_sets`：规则型决策规则集
+- `decision_model_registry`：模型型决策注册表
+
+适用场景：
+- 配置规则型/模型型/智能型决策
+- 为 decision 节点提供可选规则和模型资源
+
+### E. 执行型智能体
+- `execution_target_registry`：执行目标目录
+- `tool_run_logs`：执行工具调用轨迹
+
+适用场景：
+- 配置 Go API / department_table / 第三方执行目标
+- 查看执行型节点调用过程与失败原因
+
+### F. 对话型智能体
+- `workflow_registry`：对话选流目录
+- `chat_sessions`：对话会话
+- `chat_messages`：对话消息与卡片
+- `department_grants`（建议后续补充）：部门与 workflow 授权关系
+
+适用场景：
+- 对话型智能体从目录中选 workflow
+- 记录 ask / approve / command 路由
+- 保存对话上下文、审批卡片、结果回传
+
+### G. 记忆与知识
+- `agent_memories`：历史执行记忆
+- `rag_docs_index`：RAG 知识索引元数据
+
+适用场景：
+- 历史执行参考
+- 对话问答和决策引用知识
+
+### H. 监控与审计
+- `incidents`：监控事件聚合单
+- `audit_logs`：统一审计日志
+- `monitor_snapshots`：监控指标快照
+
+适用场景：
+- 监控工作台
+- 审计追踪
+- 异常聚合与受控干预
+
+### I. 通用智能体配置
+- `agent_configs`：五类智能体统一配置表
+
+适用场景：
+- 节点级 agent 配置存储
+- 智能体配置版本化与启停控制
+
+## 2.2 按开发步骤索引需要关注的表
+
+### M1 基础底座
+优先关注：
+- `workflows`
+- `workflow_versions`
+- `execution_runs`
+- `approval_tasks`
+- `audit_logs`
+
+用途：
+- 搭 workflow 真相源
+- 支撑发布状态机
+- 为 execution / 审批 / 审计建立最小运行骨架
+
+### M2 画布与工作流编排
+优先关注：
+- `workflows`
+- `workflow_versions`
+- `workflow_node_configs`（如需拆分）
+- `agent_configs`
+- `sensor_subscriptions`
+- `sensor_event_inbox`
+
+用途：
+- 支撑画布保存、编译、发布
+- 支撑感知节点配置与沙盒联调
+
+### M3 对话视界与审批
+优先关注：
+- `chat_sessions`
+- `chat_messages`
+- `workflow_registry`
+- `approval_tasks`
+- `execution_runs`
+- `department_grants`（若进入精细授权）
+
+用途：
+- 对话工作台
+- workflow 目录检索
+- ask/approve/command 路由
+- 审批卡片与恢复执行
+
+### M4 智能体能力接入
+优先关注：
+- `sensor_subscriptions`
+- `sensor_event_inbox`
+- `decision_rule_sets`
+- `decision_model_registry`
+- `execution_target_registry`
+- `tool_run_logs`
+- `agent_memories`
+
+用途：
+- 接入感知/决策/执行型智能体 handler
+- 接入 Go API、department_table 和其他执行目标
+- 建立历史执行参考能力
+
+### M5 监控运维与验收
+优先关注：
+- `incidents`
+- `audit_logs`
+- `monitor_snapshots`
+- `tool_run_logs`
+- `execution_runs`
+
+用途：
+- 监控工作台
+- 审计追踪
+- 故障定位
+- 发布前质量回看
+
+> 使用规则：后续按 skill 推进开发时，先看 `implementation-plan.md` 当前处于哪一阶段，再回到这里根据阶段快速定位应重点关注的表。
+
+## 2.3 工作流版本原则
 - Python 数据库持有 workflow definitions 与 execution_dag
 - `ui_schema` 与 `execution_dag` 必须分字段或分表存储
 - 发布动作由 Python 完成，发布后生成不可变版本快照
 - 草稿版仅用于编辑或沙盒测试，正式执行默认只读取 released 版本
 
-## 2.2 推荐关键表
+## 2.4 推荐关键表
 
 ### workflows
 | 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |
@@ -184,13 +340,23 @@
 |---|---|---|---|---|---|
 | id | uuid | 是 |  | PK | 执行目标主键 |
 | dept_id | varchar(64) | 否 | null | index | 部门范围 |
-| target_type | varchar(64) | 是 |  | index | go_api/feishu/email/device/file/mcp |
+| target_type | varchar(64) | 是 |  | index | go_api/department_table/feishu/email/device/file/mcp |
 | code | varchar(128) | 是 |  | unique | 目标编码 |
 | name | varchar(255) | 是 |  |  | 目标名称 |
 | config | jsonb | 是 |  |  | 目标配置 |
 | status | varchar(32) | 是 | active | index | active/inactive |
 | created_at | timestamptz | 是 | now() |  | |
 | updated_at | timestamptz | 是 | now() |  | |
+
+`department_table` 类型配置要求：
+- `provider`：底层表格提供方，如 `bitable | spreadsheet | custom_table`
+- `resource_locator`：表格资源定位信息，如应用、数据表、视图、工作簿标识
+- `operation`：默认支持 `append_row`，预留 `upsert_row | update_row`
+- `row_mapping`：写入字段映射规则
+- `default_values`：缺省值填充
+- `idempotency_key_template`：部门表格写入幂等键模板
+- `writeback_policy`：写入成功后是否回填行标识或链接
+- `permission_scope`：允许写入的部门、角色或 workflow 范围
 
 ### workflow_registry
 | 字段 | 类型 | 必填 | 默认值 | 索引/约束 | 说明 |

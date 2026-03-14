@@ -88,7 +88,7 @@
 ## 5. 各节点最小配置
 
 ### 5.1 sensor_agent
-- `source_type`: `iot | form_change | supply_chain_event | third_party_notice | schedule`
+- `source_type`: `iot | form_change | supply_chain_event | third_party_notice | schedule | manual`
 - `trigger_condition`
 - `input_mapping`
 
@@ -111,9 +111,9 @@
   "name": "库存变更感知",
   "config": {
     "source_type": "form_change",
-    "source_system": "ERP生产库",
+    "source_system": "erp_prod",
     "source_table": "inventory_stock",
-    "source_event_key": "erp.production.db.inventory_stock",
+    "source_event_key": "record.updated",
     "selected_fields": ["item_id", "stock_count", "safety_limit", "warehouse_id"],
     "condition_logic": "and",
     "conditions": [
@@ -134,6 +134,10 @@
   }
 }
 ```
+
+当前阶段补充口径：
+- `source_system / source_table / source_event_key / selected_fields / conditions` 在前端应优先通过后端 `sensor-metadata` 目录接口下拉选择，而不是依赖自由输入
+- `payload.*` 输出映射默认面向数据库变更事件的 `after` 快照；若要读取原始事件信封，则使用 `event.*`
 
 ### 5.2 decision_agent
 - `decision_mode`: `rule | model | llm`
@@ -238,6 +242,15 @@
 - `result_template`
 - `failure_delivery`
 
+`execution_targets` 中推荐支持的 `target_type`：
+- `go_api`
+- `department_table`
+- `feishu`
+- `email`
+- `device`
+- `file`
+- `mcp`
+
 执行型节点推荐示例：
 ```json
 {
@@ -248,8 +261,9 @@
     "execution_target_mode": "manual",
     "execution_targets": [
       {
-        "target_type": "go_api",
-        "target_ref": "records.inventory_replenishment"
+        "target_type": "department_table",
+        "target_ref": "dept_table.production.replenishment_register",
+        "operation": "append_row"
       }
     ],
     "approval_mode": "risk_based",
@@ -264,8 +278,62 @@
 }
 ```
 
+`department_table` 目标推荐配置字段：
+- `target_ref`：执行目标注册表中的目标编码
+- `provider`：底层表格提供方，如 `bitable | spreadsheet | custom_table`
+- `operation`：`append_row | upsert_row | update_row`
+- `sheet_locator`：表格/数据表定位信息
+- `dept_route_mode`：`current_dept | fixed_dept | derived`
+- `row_mapping`：字段映射规则
+- `default_values`：缺省值注入
+- `idempotency_key_template`：防重复写入模板
+- `write_result_contract`：写入后回传结构
+
+`department_table` 推荐示例：
+```json
+{
+  "id": "execution_dept_register",
+  "type": "execution_agent",
+  "name": "部门台账登记",
+  "config": {
+    "execution_target_mode": "manual",
+    "execution_targets": [
+      {
+        "target_type": "department_table",
+        "target_ref": "dept_table.production.replenishment_register",
+        "provider": "bitable",
+        "operation": "append_row",
+        "dept_route_mode": "current_dept",
+        "sheet_locator": {
+          "app_token": "dept_app_placeholder",
+          "table_id": "tbl_replenishment"
+        },
+        "row_mapping": {
+          "物料编码": "decision_payload.target_item_id",
+          "仓库": "decision_payload.target_warehouse_id",
+          "建议补货量": "decision_payload.recommended_quantity",
+          "风险等级": "risk_level"
+        },
+        "default_values": {
+          "状态": "待处理"
+        },
+        "idempotency_key_template": "{{dept_id}}:{{execution_id}}:{{node_id}}",
+        "write_result_contract": {
+          "return_row_id": true,
+          "return_sheet_name": true
+        }
+      }
+    ],
+    "approval_mode": "risk_based",
+    "approval_required": true,
+    "result_delivery": "chat"
+  }
+}
+```
+
 第一阶段最小要求：
 - 可选择 `execution_target_mode`
+- 可配置并使用 `department_table` 执行目标
 - 可配置是否进入审批
 - 审批卡片必须可投递到对话工作区
 - 执行结果必须可回传到对话工作区

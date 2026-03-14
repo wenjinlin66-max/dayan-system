@@ -23,6 +23,11 @@
 - `PGUSER`
 - `PGPASSWORD`
 - `PGDATABASE`
+- `MOCK_PGHOST`
+- `MOCK_PGPORT`
+- `MOCK_PGUSER`
+- `MOCK_PGPASSWORD`
+- `MOCK_PGDATABASE`
 
 ### 2.3 Redis 配置
 - `REDIS_HOST`
@@ -39,6 +44,11 @@
 
 ### 2.5 模型与检索配置
 - `DEFAULT_LLM_PROVIDER`
+- `LLM_API_KEY`
+- `LLM_BASE_URL`
+- `LLM_MODEL`
+- `LLM_REQUEST_PATH`
+- `LLM_TIMEOUT_MS`
 - `DEEPSEEK_API_KEY`
 - `DEEPSEEK_BASE_URL`
 - `EMBEDDING_PROVIDER`
@@ -53,6 +63,11 @@
 - `WORKFLOW_DEFAULT_MODE`
 - `ENABLE_SANDBOX_MODE`
 - `SCHEDULER_ENABLED`
+- `GO_RECORDS_BASE_URL`
+- `GO_RECORDS_TIMEOUT_MS`
+- `RUNTIME_DEFAULT_TENANT_ID`
+- `ENABLE_MOCK_RECORDS_GATEWAY`
+- `DEPARTMENT_TABLE_ROUTE_MAP_JSON`
 
 ## 3. 当前推荐环境变量
 
@@ -75,6 +90,12 @@ PGUSER=postgres
 PGPASSWORD=postgres
 PGDATABASE=dayan_agentic2
 
+MOCK_PGHOST=localhost
+MOCK_PGPORT=55432
+MOCK_PGUSER=postgres
+MOCK_PGPASSWORD=postgres
+MOCK_PGDATABASE=dayan_mock_records
+
 # =========================
 # Redis
 # =========================
@@ -95,8 +116,14 @@ S3_REGION=us-east-1
 # =========================
 # LLM / Embedding / Rerank
 # =========================
-DEFAULT_LLM_PROVIDER=deepseek
-DEEPSEEK_API_KEY=<YOUR_DEEPSEEK_API_KEY>
+DEFAULT_LLM_PROVIDER=gemini_proxy
+LLM_API_KEY=<YOUR_PROXY_API_KEY>
+LLM_BASE_URL=https://<your-proxy-host>/v1
+LLM_MODEL=gemini-3-flash-preview-thinking
+LLM_REQUEST_PATH=/chat/completions
+LLM_TIMEOUT_MS=30000
+
+DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=
 
 EMBEDDING_PROVIDER=local
@@ -115,6 +142,11 @@ REALTIME_TRANSPORT=sse
 WORKFLOW_DEFAULT_MODE=released
 ENABLE_SANDBOX_MODE=true
 SCHEDULER_ENABLED=true
+GO_RECORDS_BASE_URL=
+GO_RECORDS_TIMEOUT_MS=8000
+RUNTIME_DEFAULT_TENANT_ID=tenant_local
+ENABLE_MOCK_RECORDS_GATEWAY=true
+DEPARTMENT_TABLE_ROUTE_MAP_JSON={}
 ```
 
 ## 4. 配置解释
@@ -122,6 +154,10 @@ SCHEDULER_ENABLED=true
 ### 4.1 PostgreSQL
 - 当前连接的是 Docker 版 PostgreSQL + pgvector
 - 不是本机未装扩展的 PostgreSQL 实例
+- 主库 `dayan_agentic2` 与 Mock 业务库 `dayan_mock_records` 必须逻辑分离
+- Mock 业务库只服务于业务表格联调与感知型智能体事件触发，不承载 workflow/chat/approval 主真相数据
+- Go 正式 records 能力接入后，`MOCK_PG*` 配置允许整体删除
+- 当前实现中，服务启动会尝试自动创建 `dayan_mock_records`；若 PostgreSQL 账号没有 `CREATE DATABASE` 权限，则需提前手工创建该库
 
 ### 4.2 Redis
 - 当前连接的是 Docker 版 Redis
@@ -132,13 +168,34 @@ SCHEDULER_ENABLED=true
 - 用于 PDF、语音、OCR 中间文件、文档上传
 
 ### 4.4 模型
-- 默认 LLM：DeepSeek 在线 API
+- 默认 LLM：Gemini 中转站（OpenAI-compatible）
 - Embedding / Rerank：当前规划为本地部署
 - GPU：当前已确认可用
+- 推荐优先使用 OpenAI Chat compatible 接法：`base_url=/v1` + `/chat/completions`
+- 若未来代理明确支持 Responses API，可再增加 `LLM_REQUEST_PATH=/responses` 兼容层
+- 禁止把真实 API key 写入 `.env.example`、skill 文档、代码常量或提交记录
 
 ### 4.5 实时推送
 - 第一阶段默认 SSE
 - WebSocket 暂不作为默认实现
+
+### 4.6 Go Records / department_table adapter
+- `GO_RECORDS_BASE_URL`：Go 泛型 records API 的基础地址
+- `GO_RECORDS_TIMEOUT_MS`：Python 调用 Go records API 的超时时间
+- `RUNTIME_DEFAULT_TENANT_ID`：当前 runtime 侧默认 tenant_id
+- `ENABLE_MOCK_RECORDS_GATEWAY`：当 Go records API 未配置时，是否允许退回 mock adapter
+- `DEPARTMENT_TABLE_ROUTE_MAP_JSON`：`target_ref -> table_id/provider/dept_id` 的 JSON 路由表
+
+推荐示例：
+```json
+{
+  "dept_table.production.replenishment_register": {
+    "table_id": "replenishment_requests",
+    "provider": "bitable",
+    "dept_id": "production"
+  }
+}
+```
 
 ## 5. 建议的 `.env.local` 模板
 
@@ -155,6 +212,12 @@ PGUSER=postgres
 PGPASSWORD=postgres
 PGDATABASE=dayan_agentic2
 
+MOCK_PGHOST=localhost
+MOCK_PGPORT=55432
+MOCK_PGUSER=postgres
+MOCK_PGPASSWORD=postgres
+MOCK_PGDATABASE=dayan_mock_records
+
 REDIS_HOST=localhost
 REDIS_PORT=56379
 REDIS_PASSWORD=
@@ -166,7 +229,13 @@ S3_SECRET_KEY=minioadmin
 S3_BUCKET=dayan-agent-files
 S3_REGION=us-east-1
 
-DEFAULT_LLM_PROVIDER=deepseek
+DEFAULT_LLM_PROVIDER=gemini_proxy
+LLM_API_KEY=
+LLM_BASE_URL=https://<your-proxy-host>/v1
+LLM_MODEL=gemini-3-flash-preview-thinking
+LLM_REQUEST_PATH=/chat/completions
+LLM_TIMEOUT_MS=30000
+
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=
 
@@ -183,6 +252,11 @@ REALTIME_TRANSPORT=sse
 WORKFLOW_DEFAULT_MODE=released
 ENABLE_SANDBOX_MODE=true
 SCHEDULER_ENABLED=true
+GO_RECORDS_BASE_URL=
+GO_RECORDS_TIMEOUT_MS=8000
+RUNTIME_DEFAULT_TENANT_ID=tenant_local
+ENABLE_MOCK_RECORDS_GATEWAY=true
+DEPARTMENT_TABLE_ROUTE_MAP_JSON={}
 ```
 
 ## 6. Python 配置模块建议

@@ -106,6 +106,26 @@
 | /api/v1/workflows | POST | 创建工作流草稿 | Python侧鉴权 | 否 |
 | /api/v1/workflows/:workflow_id/draft | PUT | 更新工作流草稿 | Python侧鉴权 | 是 |
 
+补充读取约束：
+- `GET /api/v1/workflows` 返回中必须包含 `workflow_category`
+- `GET /api/v1/workflows` 返回中应补充 `workflow_trigger_type`，用于明确当前 workflow 的触发逻辑分类
+- `GET /api/v1/workflows`、`GET /draft`、`GET /releases/current`、`GET /versions`、`PUT /draft`、`POST /publish` 必须按 `dept_id` 做后端硬限制
+- 工作流查看区前端不再用“部门下拉筛选”承担越权防护职责
+
+补充分类约束：
+- 当前保存/发布阶段，`category` 字段先承载“触发逻辑分类”语义
+- 触发逻辑分类至少支持：`dialog_trigger / event_trigger / schedule_trigger`
+- 后续若部门分类口径稳定，再在查看区与目录侧扩展为“部门 → 触发逻辑”两层分类，而不是重新发明另一套平行字段
+
+补充删除约束：
+- `DELETE /api/v1/workflows/{workflow_id}` 采用真实删除语义
+- 删除时应一并删除对应 workflow 定义数据：`workflow_registry`、`workflow_versions`、`workflows`
+- 删除后该 workflow 应从制作区列表、工作流查看区、chat catalog 暴露面中消失
+
+补充错误约束：
+- 若 `POST /api/v1/workflows` 中的 `code` 与已有 workflow 重复，必须返回 `409 Conflict`
+- 错误详情建议固定为 `WORKFLOW_CODE_ALREADY_EXISTS`，前端据此给出“工作流编码已存在”的可读提示
+
 ### 2.2 编译与发布
 | 接口 | 方法 | 说明 | 鉴权 | 幂等 |
 |---|---|---|---|---|
@@ -119,10 +139,24 @@
 | 接口 | 方法 | 说明 | 鉴权 | 幂等 |
 |---|---|---|---|---|
 | /api/v1/executions/start | POST | 按 workflow_id + version/mode 启动执行 | Python侧鉴权 | 是 |
+| /api/v1/executions/inject/mock-event | POST | 以标准事件信封形态注入 mock 数据库事件，驱动感知型工作流 | Python侧鉴权 | 是 |
 | /api/v1/executions/:execution_id | GET | 查询执行状态 | Python侧鉴权 | 是 |
+| /api/v1/executions/:execution_id/stream | GET | 以 SSE 推送执行状态快照 | Python侧鉴权 | 是 |
 | /api/v1/executions/:execution_id/resume | POST | 恢复审批或等待中的执行 | Python侧鉴权 | 是 |
 | /api/v1/executions/:execution_id/cancel | POST | 取消执行 | Python侧鉴权 | 是 |
 | /api/v1/executions/:execution_id/timeline | GET | 查询执行时间线 | Python侧鉴权 | 是 |
+
+### 2.3.1 临时 Mock Records API
+| 接口 | 方法 | 说明 | 鉴权 | 幂等 |
+|---|---|---|---|---|
+| /api/v1/records/sources | GET | 获取临时 Mock Records 来源列表 | Python侧鉴权 | 是 |
+| /api/v1/records/tables | GET | 获取临时 Mock Records 表列表 | Python侧鉴权 | 是 |
+| /api/v1/records/tables/:table_name/schema | GET | 获取表结构说明 | Python侧鉴权 | 是 |
+| /api/v1/records/tables/:table_name/rows | GET | 获取表数据 | Python侧鉴权 | 是 |
+| /api/v1/records/tables/:table_name/rows | POST | 新增记录并触发标准事件 | Python侧鉴权 | 否 |
+| /api/v1/records/tables/:table_name/rows/:record_id | PUT | 更新记录并触发标准事件 | Python侧鉴权 | 是 |
+| /api/v1/records/tables/:table_name/rows/:record_id | DELETE | 删除记录并触发标准事件 | Python侧鉴权 | 是 |
+| /api/v1/records/events/recent | GET | 获取最近事件与触发 execution 摘要 | Python侧鉴权 | 是 |
 
 ### 2.4 监控与运维接口
 | 接口 | 方法 | 说明 | 鉴权 | 幂等 |
@@ -143,6 +177,16 @@
 | /api/v1/chat/sessions/:session_id/approvals | GET | 查询会话内审批卡片 | Python侧鉴权 | 是 |
 | /api/v1/chat/workflows/catalog | GET | 按部门/职能查询可用 workflow 目录 | Python侧鉴权 | 是 |
 | /api/v1/chat/route | POST | 对消息执行 ask/approve/command 路由 | Python侧鉴权 | 是 |
+| /api/v1/chat/sessions/:session_id/workflows/:workflow_id/start | POST | 从目录或候选确认结果中显式启动某条 workflow | Python侧鉴权 | 是 |
+
+补充会话响应约束：
+- `GET /api/v1/chat/sessions` 与 `POST /api/v1/chat/sessions` 返回中应包含 `dept_id` 与 `last_message_at`
+- 对话工作台以前端“部门对话框 / 部门会话”为主组织单位，不按 workflow 维度暴露入口
+
+补充消息回流约束：
+- 当 execution 因 `approval` 节点进入等待审批时，应向当前 chat session 写入一条审批提醒消息
+- 当审批被同意/驳回时，应向当前 chat session 写入一条审批结果消息
+- 当 execution 进入 finished / failed / cancelled 终态时，应向当前 chat session 写入一条执行结果消息
 
 ### 2.6 对话路由契约
 对话型智能体不得只靠自由语言直接执行 workflow，必须走：
@@ -161,12 +205,59 @@
       "workflow_id": "wf_replenishment",
       "title": "补货申请流",
       "category": "inventory",
-      "confidence": 0.82
+      "confidence": 0.82,
+      "required_inputs": ["item_id", "quantity"],
+      "input_schema": {
+        "properties": {
+          "item_id": {
+            "title": "物料编码",
+            "type": "string"
+          },
+          "quantity": {
+            "title": "补货数量",
+            "type": "number"
+          }
+        }
+      }
     }
   ],
   "needs_confirmation": false,
-  "missing_inputs": []
+  "missing_inputs": ["item_id", "quantity"]
 }
+```
+
+候选确认启动请求示例：
+```json
+{
+  "source": "candidate_confirmation",
+  "source_message_id": "msg_candidate_001",
+  "note": "用户点击候选 workflow 启动"
+}
+```
+
+参数补齐后启动请求示例：
+```json
+{
+  "source": "parameter_completion",
+  "source_message_id": "msg_candidate_001",
+  "note": "补齐参数后启动 workflow",
+  "input_values": {
+    "item_id": "A-1001",
+    "quantity": 200,
+    "reason": "库存低于安全库存"
+  }
+}
+```
+
+补充约束：
+- 若 workflow registry 中声明了 `required_inputs`，则目录启动、候选确认启动、自动命令启动都必须先经过缺参校验
+- 缺参时不得直接创建 execution，而是返回 `missing_inputs + candidate_workflows[0].input_schema`，由前端继续渲染参数补齐卡片
+- 参数补齐后的再次启动，必须继续复用同一条 `chat/sessions/:session_id/workflows/:workflow_id/start` 接口
+
+执行状态 SSE 示例：
+```text
+event: status
+data: {"execution_id":"exec_001","status":"running","current_node":"execution_agent_1"}
 ```
 
 ## 3. Python -> Go 泛型操作契约
@@ -177,11 +268,134 @@
 | /api/v1/records/:table_id/:record_id | DELETE | 删除业务记录 | Go侧鉴权 | 是 |
 | /api/v1/records/:table_id/query | POST | 查询业务记录 | Go侧鉴权 | 是 |
 
-## 3.1 Go -> Python 感知事件消费约束
+## 3.1 Python -> 部门表格写入契约
+
+当执行型智能体选择 `department_table` 作为执行目标时，统一按如下请求/响应口径调用底层适配器或工具执行器。
+
+请求示例：
+```json
+{
+  "execution_id": "exec_001",
+  "workflow_id": "wf_replenishment",
+  "workflow_version": 3,
+  "node_id": "execution_dept_register",
+  "dept_id": "production",
+  "operator_id": "u_001",
+  "target_code": "dept_table.production.replenishment_register",
+  "target_type": "department_table",
+  "provider": "bitable",
+  "operation": "append_row",
+  "idempotency_key": "production:exec_001:execution_dept_register",
+  "row_payload": {
+    "物料编码": "A-1001",
+    "仓库": "W-01",
+    "建议补货量": 200,
+    "风险等级": "medium"
+  },
+  "write_options": {
+    "allow_duplicate": false,
+    "return_row_id": true,
+    "return_sheet_name": true
+  }
+}
+```
+
+响应示例：
+```json
+{
+  "status": "succeeded",
+  "target_code": "dept_table.production.replenishment_register",
+  "provider": "bitable",
+  "operation": "append_row",
+  "dept_id": "production",
+  "sheet_name": "生产部补货登记表",
+  "row_id": "rec_001",
+  "summary": "已写入生产部补货登记表",
+  "trace_id": "toolrun_001"
+}
+```
+
+字段约束：
+- `dept_id` 必须与当前 execution 上下文一致，不得跨部门越权写入
+- `target_code` 必须来自 `execution_target_registry` 的已启用目标
+- `operation` 第一阶段至少支持 `append_row`
+- `idempotency_key` 必须参与去重，避免重复插入
+- 结果必须可回传到对话工作区，并写入审计日志与工具执行轨迹
+
+## 3.2 Go -> Python 感知事件消费约束
 - Go 是数据库变更事件的发布方
 - Python 是感知订阅与条件匹配的消费方
 - Python 第一阶段不直接做数据库 CDC，而是消费 Go 发布的业务事件
 - Python 消费后应写入 `sensor_event_inbox`，再由 `sensor_subscriptions` 做匹配与分发
+
+## 3.3 初期开发阶段的本地联调 / Mock 契约
+
+在初期开发阶段，如果 Go 数据库、Go 泛型 API 或真实事件总线尚未接入，允许通过 **Mock Gateway / Sandbox Adapter** 验证 Python 工作流能力，但必须遵循与正式契约一致的字段口径。
+
+原则：
+- Mock 只替代“数据来源与执行落点”，不替代正式契约结构
+- 感知型智能体仍消费与正式环境相同结构的事件信封
+- 对话型/执行型智能体仍调用与正式环境一致的查询/写入抽象接口
+- Mock 数据必须带 `dept_id`、`tenant_id`、`actor`、`trace_id`、`idempotency_key` 等关键字段，避免联调时漏掉权限与幂等问题
+
+推荐两类 Mock 方式：
+
+### A. 事件回放方式（验证感知型 + workflow 启动）
+- 由 Python 本地提供 `mock event inject` 能力，将标准事件信封直接写入 `sensor_event_inbox`
+- 事件结构必须与 `1.1 统一事件信封` 和 `1.3 数据库实时感知第一阶段标准事件` 保持一致
+- 适用于验证：条件匹配、字段映射、workflow 启动、审批、结果回传
+
+推荐注入请求示例：
+```json
+{
+  "workflow_id": "wf_inventory_sensor",
+  "version": 3,
+  "mode": "released",
+  "event_type": "record.updated",
+  "source": "mock.gateway",
+  "event": {
+    "event_id": "evt_mock_001",
+    "source_system": "mock_erp",
+    "table": "inventory_stock",
+    "operation": "updated",
+    "changed_fields": ["stock_count"],
+    "after": {
+      "item_id": "A-1001",
+      "stock_count": 16,
+      "safety_limit": 20,
+      "warehouse_id": "W-01"
+    }
+  }
+}
+```
+
+当前阶段实现约束：
+- Python 在 `inject/mock-event` 内部会将上述请求包装为统一 `trigger.type=event` 的 execution start 请求
+- `sensor_agent` 默认对 `event.payload.after` 进行条件匹配与 `payload.*` 输出映射；若映射路径写为 `event.*`，则读取原始事件信封字段
+- `source_system / source_table / source_event_key` 会参与第一轮来源匹配；只有来源命中且条件命中时，workflow 才继续向下游节点流转
+- 若感知未命中，execution 允许以“无下游继续执行”的方式平滑结束，但 `final_output.sensor_outputs` 必须保留本次来源匹配/条件匹配结果
+
+### B. Mock Records Gateway（验证对话型查询 + 执行型增删改）
+- Python 本地增加 `mock records gateway` 适配层，模拟 Go 泛型 records API 的响应
+- query/create/update/delete 的请求结构、响应结构、错误码与幂等规则必须尽量与正式 Go API 对齐
+- 适用于验证：对话型查询、执行型写入、审批恢复后执行、结果回传、审计留痕
+
+推荐约束：
+- Mock Gateway 内部可使用 JSON 文件、SQLite、本地 PostgreSQL 或内存仓库承载测试数据
+- 但对外暴露的接口语义必须继续使用 `table_id / record_id / dept_id / operator / payload`
+- 所有 Mock 写入都必须保留审计与工具调用轨迹，避免只验证“成功路径”
+
+当前第一批实现补充：
+- 已采用独立 PostgreSQL 数据库 `dayan_mock_records` 作为临时测试底座
+- 服务启动时会自动确保 `dayan_mock_records` 存在，并初始化：`inventory_stock / production_order / device_status / sensor_change_log`
+- 通过 `/api/v1/records/*` 修改记录时，Python 会自动生成 `record.created / record.updated / record.deleted` 事件并写入 `sensor_change_log`
+- 事件会按 `source_system=dayan_mock_records + table_name + event_type` 匹配已发布 workflow 中的 `sensor_agent`，若命中则直接触发 execution
+- 该层属于临时测试设施；Go 正式 records 能力接入后应整体删除，不作为正式产品模块保留
+
+结论：
+- 早期开发不要等 Go 数据库直连完成后再验证 workflow
+- 应先以 **标准事件信封 + Mock Records Gateway** 把 Python 工作流、审批、对话、执行链路跑通
+- 待 Go 真实接口就绪后，仅替换 adapter，不重写 workflow 与节点契约
 
 ## 4. 审批挂起 / 唤醒契约
 
@@ -366,6 +580,7 @@
 对于感知型数据库事件：
 - Go 负责按业务权限生成合法变更事件
 - Python 负责按 `dept_id + source_event_key + subscription` 再做第二层过滤
+- 对于当前 MVP 的前端联调入口，WorkflowCanvasPage 可直接构造上述 mock event inject 请求，不要求配置员手工拼接 HTTP 请求
 
 ## 7.1 部门隔离原则
 - 所有 Python 接口默认要求 `dept_id` 上下文
