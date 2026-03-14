@@ -17,6 +17,16 @@ const routes: RouteRecordRaw[] = [
     name: 'monitor-workbench',
     component: () => import('@/pages/MonitorWorkbenchPage.vue'),
   },
+  {
+    path: '/workflow-library',
+    name: 'workflow-library',
+    component: () => import('@/pages/WorkflowLibraryPage.vue'),
+  },
+  {
+    path: '/records-workbench',
+    name: 'records-workbench',
+    component: () => import('@/pages/RecordsWorkbenchPage.vue'),
+  },
 ]
 
 export default createRouter({
