@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timezone
-from typing import Any
+from datetime import date, datetime
+from typing import cast
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -279,12 +280,16 @@ class MockRecordsService:
         raw_nodes = execution_dag.get("nodes")
         if not isinstance(raw_nodes, list):
             return False
-        for item in raw_nodes:
-            if not isinstance(item, dict) or item.get("type") != "sensor_agent":
+        for raw_item in cast(list[object], raw_nodes):
+            if not isinstance(raw_item, dict):
                 continue
-            config = item.get("config")
-            if not isinstance(config, dict):
+            item = cast(dict[str, object], raw_item)
+            if item.get("type") != "sensor_agent":
                 continue
+            raw_config = item.get("config")
+            if not isinstance(raw_config, dict):
+                continue
+            config = cast(dict[str, object], raw_config)
             source_system = str(config.get("source_system") or "")
             source_table = str(config.get("source_table") or "")
             source_event_key = str(config.get("source_event_key") or "")
@@ -318,9 +323,11 @@ class MockRecordsService:
     def _serialize_row(self, row: InventoryStockRecord | ProductionOrderRecord | DeviceStatusRecord) -> dict[str, object]:
         result: dict[str, object] = {}
         for field_name in row.__mapper__.columns.keys():
-            value = getattr(row, field_name)
-            if hasattr(value, "isoformat"):
-                result[field_name] = str(value.isoformat())
+            value = cast(object, getattr(row, field_name))
+            if isinstance(value, datetime):
+                result[field_name] = value.isoformat()
+            elif isinstance(value, date):
+                result[field_name] = value.isoformat()
             else:
                 result[field_name] = value
         return result
@@ -332,7 +339,7 @@ class MockRecordsService:
             return [key for key in before.keys() if key != "updated_at"]
         if not after:
             return [key for key in before.keys() if key != "updated_at"]
-        changed = []
+        changed: list[str] = []
         for key, value in after.items():
             if before.get(key) != value:
                 changed.append(key)

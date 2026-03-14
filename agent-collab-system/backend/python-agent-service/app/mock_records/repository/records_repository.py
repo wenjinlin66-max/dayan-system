@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import ClassVar
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -17,11 +18,12 @@ TableModel = InventoryStockRecord | ProductionOrderRecord | DeviceStatusRecord
 
 
 class MockRecordsRepository:
-    TABLE_MODEL_MAP = {
+    TABLE_MODEL_MAP: ClassVar[dict[str, type[TableModel]]] = {
         "inventory_stock": InventoryStockRecord,
         "production_order": ProductionOrderRecord,
         "device_status": DeviceStatusRecord,
     }
+    session: AsyncSession
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -45,8 +47,8 @@ class MockRecordsRepository:
     async def create_row(self, table_name: str, values: dict[str, object]) -> TableModel:
         model = self.get_model(table_name)
         payload = {**values}
-        payload.setdefault("id", f"rec_{uuid4().hex[:12]}")
-        payload["updated_at"] = datetime.utcnow()
+        _ = payload.setdefault("id", f"rec_{uuid4().hex[:12]}")
+        payload["updated_at"] = datetime.now(UTC)
         instance = model(**payload)
         self.session.add(instance)
         await self.session.flush()
@@ -59,7 +61,7 @@ class MockRecordsRepository:
         for key, value in values.items():
             if hasattr(instance, key):
                 setattr(instance, key, value)
-        instance.updated_at = datetime.utcnow()
+        instance.updated_at = datetime.now(UTC)
         await self.session.flush()
         return instance
 

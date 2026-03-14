@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import select, update
@@ -81,7 +82,7 @@ class ChatRepository:
         )
         self.session.add(message)
         await self.session.flush()
-        await self.touch_session(session_id, last_message_at=datetime.utcnow())
+        await self.touch_session(session_id, last_message_at=datetime.now(UTC))
         return message
 
     async def list_catalog(self, dept_id: str, category: str | None = None) -> list[WorkflowRegistry]:

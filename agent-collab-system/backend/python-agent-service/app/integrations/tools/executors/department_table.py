@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
+from typing import cast
 from uuid import uuid4
 
 from app.integrations.go_client.records import GoRecordsClient
@@ -18,9 +20,18 @@ class DepartmentTableRoute:
 
 
 class MockRecordsGateway:
+    @staticmethod
+    def _serialize_record_value(value: object) -> JsonValue:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        return cast(JsonValue, value)
+
     async def append_row(self, route: DepartmentTableRoute, payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
         dept_id = str(payload.get("dept_id") or route.dept_id or "unknown")
         row_payload = payload.get("row_payload") if isinstance(payload.get("row_payload"), dict) else {}
+        serialized_row_payload: dict[str, JsonValue] = {}
         table_name = route.table_id
         if not isinstance(row_payload, dict):
             row_payload = {}
@@ -50,8 +61,8 @@ class MockRecordsGateway:
                 else:
                     record = await repository.create_row(table_name, object_payload)
                 await session.commit()
-                row_payload = {
-                    field_name: (getattr(record, field_name).isoformat() if hasattr(getattr(record, field_name), "isoformat") else getattr(record, field_name))
+                serialized_row_payload = {
+                    field_name: self._serialize_record_value(cast(object, getattr(record, field_name)))
                     for field_name in record.__mapper__.columns.keys()
                 }
             except ValueError:
@@ -66,10 +77,10 @@ class MockRecordsGateway:
             "operation": payload.get("operation"),
             "dept_id": dept_id,
             "sheet_name": f"{dept_id} 部门登记表",
-            "row_id": str(row_payload.get("id") or f"row_{uuid4().hex[:10]}"),
+            "row_id": str(serialized_row_payload.get("id") or f"row_{uuid4().hex[:10]}"),
             "summary": f"已向 {route.table_id} 写入一条结构化记录",
             "trace_id": f"toolrun_{uuid4().hex[:10]}",
-            "row_payload": row_payload,
+            "row_payload": serialized_row_payload,
         }
 
 
