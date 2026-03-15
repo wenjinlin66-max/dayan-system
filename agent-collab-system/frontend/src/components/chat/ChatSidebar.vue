@@ -15,16 +15,28 @@
     </div>
 
     <div class="space-y-2">
-      <button
+      <div
         v-for="session in visibleSessions"
         :key="session.session_id"
-        class="w-full rounded-2xl border px-3 py-3 text-left text-sm transition"
+        class="group rounded-2xl border px-3 py-3 text-sm transition"
         :class="session.session_id === currentSessionId ? 'border-sky-300 bg-sky-50 text-sky-900 shadow-sm shadow-sky-100/80' : 'border-slate-200 bg-slate-50/70 text-slate-700 hover:bg-white'"
-        @click="handleSelectSession(session.session_id)"
       >
-        <div class="font-medium">{{ session.title }}</div>
-        <div class="mt-1 text-xs text-slate-500">{{ session.dept_id }} · {{ session.last_message_at ? formatTime(session.last_message_at) : '刚创建' }}</div>
-      </button>
+        <div class="flex items-start justify-between gap-3">
+          <button class="min-w-0 flex-1 text-left" @click="handleSelectSession(session.session_id)">
+            <div class="truncate font-medium">{{ session.title }}</div>
+            <div class="mt-1 text-xs text-slate-500">{{ session.dept_id }} · {{ session.last_message_at ? formatTime(session.last_message_at) : '刚创建' }}</div>
+          </button>
+          <el-button
+            text
+            type="danger"
+            size="small"
+            class="opacity-100 md:opacity-0 md:group-hover:opacity-100"
+            @click.stop="handleDeleteSession(session.session_id)"
+          >
+            删除
+          </el-button>
+        </div>
+      </div>
 
       <button
         v-if="sessions.length > historyPreviewLimit"
@@ -45,16 +57,20 @@
       </template>
 
       <div class="space-y-2">
-        <button
+        <div
           v-for="session in sessions"
           :key="`dialog-${session.session_id}`"
-          class="w-full rounded-2xl border px-4 py-3 text-left transition"
+          class="group rounded-2xl border px-4 py-3 transition"
           :class="session.session_id === currentSessionId ? 'border-sky-300 bg-sky-50 text-sky-900 shadow-sm shadow-sky-100/80' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'"
-          @click="handleSelectFromHistory(session.session_id)"
         >
-          <div class="font-medium">{{ session.title }}</div>
-          <div class="mt-1 text-xs text-slate-500">{{ session.last_message_at ? formatTime(session.last_message_at) : '刚创建' }}</div>
-        </button>
+          <div class="flex items-start justify-between gap-3">
+            <button class="min-w-0 flex-1 text-left" @click="handleSelectFromHistory(session.session_id)">
+              <div class="truncate font-medium">{{ session.title }}</div>
+              <div class="mt-1 text-xs text-slate-500">{{ session.last_message_at ? formatTime(session.last_message_at) : '刚创建' }}</div>
+            </button>
+            <el-button text type="danger" size="small" @click.stop="handleDeleteSession(session.session_id)">删除</el-button>
+          </div>
+        </div>
       </div>
     </el-dialog>
   </div>
@@ -62,6 +78,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { useChatSession } from '@/composables/useChatSession'
 import { useChatStore } from '@/store/chat'
@@ -70,7 +87,7 @@ const chatStore = useChatStore()
 const sessions = computed(() => chatStore.sessions)
 const currentSessionId = computed(() => chatStore.currentSessionId)
 const currentDeptLabel = computed(() => `${chatStore.currentDeptId || 'default'} 部门`)
-const { selectSession, createSession } = useChatSession()
+const { selectSession, createSession, deleteSession } = useChatSession()
 const historyDialogVisible = ref(false)
 const historyPreviewLimit = 4
 const visibleSessions = computed(() => sessions.value.slice(0, historyPreviewLimit))
@@ -88,6 +105,28 @@ const handleSelectFromHistory = async (sessionId: string) => {
 
 const createNewSession = async () => {
   await createSession()
+}
+
+const handleDeleteSession = async (sessionId: string) => {
+  try {
+    await ElMessageBox.confirm('删除后该历史会话及消息记录将不可恢复，确认继续？', '删除历史会话', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+
+  try {
+    await deleteSession(sessionId)
+    ElMessage.success('历史会话已删除')
+    if (historyDialogVisible.value && sessions.value.length <= historyPreviewLimit) {
+      historyDialogVisible.value = false
+    }
+  } catch (error) {
+    ElMessage.error(`删除历史会话失败：${String(error)}`)
+  }
 }
 </script>
 

@@ -28,7 +28,7 @@
           </div>
         </div>
 
-        <div class="grid gap-3 px-5 py-4 md:grid-cols-2 md:px-6 xl:grid-cols-5">
+        <div class="grid gap-3 px-5 py-4 md:grid-cols-2 md:px-6 xl:grid-cols-6">
           <div class="min-w-0">
             <div class="mb-1 text-[11px] uppercase tracking-[0.2em] text-slate-500">工作流名称</div>
             <div class="rounded-[20px] border border-slate-200 bg-slate-50/80 p-1.5 shadow-inner shadow-white/70">
@@ -44,8 +44,8 @@
           </div>
 
           <div class="rounded-[20px] border border-slate-200 bg-slate-50/80 px-3.5 py-2.5 text-sm text-slate-600 shadow-inner shadow-white/60">
-            <div class="text-[11px] uppercase tracking-[0.18em] text-slate-500">流程编号</div>
-            <div class="mt-1 truncate font-medium text-slate-900">{{ workflowId || '尚未创建' }}</div>
+              <div class="text-[11px] uppercase tracking-[0.18em] text-slate-500">流程编号</div>
+              <div class="mt-1 truncate font-medium text-slate-900">{{ workflowId || '尚未创建' }}</div>
           </div>
 
           <div class="min-w-0">
@@ -57,14 +57,23 @@
             </div>
           </div>
 
+          <div class="min-w-0">
+            <div class="mb-1 text-[11px] uppercase tracking-[0.2em] text-slate-500">所属部门</div>
+            <div class="rounded-[20px] border border-slate-200 bg-slate-50/80 p-1.5 shadow-inner shadow-white/70">
+              <el-select v-model="ownerDeptProxy" class="w-full" placeholder="选择部门">
+                <el-option v-for="item in workflowDepartmentOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </div>
+          </div>
+
           <div class="min-w-0 xl:min-w-[220px]">
             <div class="mb-1 text-[11px] uppercase tracking-[0.2em] text-slate-500">加载已有流程</div>
             <div class="rounded-[20px] border border-slate-200 bg-slate-50/80 p-1.5 shadow-inner shadow-white/70">
               <el-select v-model="selectedWorkflowToLoad" class="w-full" placeholder="选择已有流程" @change="handleLoadWorkflow">
                 <el-option
-                  v-for="item in availableWorkflows"
+                  v-for="item in filteredWorkflowsToLoad"
                   :key="item.workflow_id"
-                  :label="`${item.name} (${item.code})`"
+                  :label="`${getDepartmentLabel(item.owner_dept_id)} · ${item.name} (${item.code})`"
                   :value="item.workflow_id"
                 />
               </el-select>
@@ -164,8 +173,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRoute } from 'vue-router'
 
 import WorkflowCanvas from '@/components/canvas/WorkflowCanvas.vue'
 import WorkspaceTopNav from '@/components/layout/WorkspaceTopNav.vue'
@@ -173,11 +183,13 @@ import NodeConfigPanel from '@/components/canvas/NodeConfigPanel.vue'
 import { useWorkflowPublish } from '@/composables/useWorkflowPublish'
 import { injectMockEvent } from '@/api/executions'
 import { useWorkflowStore } from '@/store/workflow'
+import { ERP_DEPARTMENT_OPTIONS, getDepartmentLabel } from '@/utils/erpDepartments'
 import { WORKFLOW_TRIGGER_TYPE_OPTIONS } from '@/utils/workflowCategory'
 
 import { ElMessageBox } from 'element-plus'
 
 const workflowStore = useWorkflowStore()
+const route = useRoute()
 
 const selectedWorkflowToLoad = ref('')
 const mockEventDialogVisible = ref(false)
@@ -213,12 +225,38 @@ const workflowCategoryProxy = computed({
   },
 })
 
+const ownerDeptProxy = computed({
+  get: () => workflowStore.ownerDeptId,
+  set: (value: string) => {
+    workflowStore.setWorkflowMeta({ ownerDeptId: value as typeof workflowStore.ownerDeptId })
+  },
+})
+
+const workflowDepartmentOptions = computed(() => ERP_DEPARTMENT_OPTIONS.filter((item) => item.value !== 'ceo'))
+
 const { canPublish, saveDraft, compile, publish, refreshWorkflowList, loadWorkflow, removeWorkflow } = useWorkflowPublish()
 
 onMounted(async () => {
   workflowStore.ensureDraftMeta()
   await refreshWorkflowList()
+  const routeWorkflowId = typeof route.query.workflowId === 'string' ? route.query.workflowId : ''
+  if (routeWorkflowId) {
+    selectedWorkflowToLoad.value = routeWorkflowId
+    await loadWorkflow(routeWorkflowId)
+  }
 })
+
+watch(
+  () => route.query.workflowId,
+  async (value) => {
+    const routeWorkflowId = typeof value === 'string' ? value : ''
+    if (!routeWorkflowId || routeWorkflowId === workflowStore.currentWorkflowId) {
+      return
+    }
+    selectedWorkflowToLoad.value = routeWorkflowId
+    await loadWorkflow(routeWorkflowId)
+  },
+)
 
 const compileResult = computed(() => workflowStore.compileResult)
 const currentRelease = computed(() => workflowStore.currentRelease)
@@ -240,6 +278,7 @@ const releaseLabel = computed(() => currentRelease.value?.version ? `第 ${curre
 const nodeCount = computed(() => workflowStore.nodes.length)
 const edgeCount = computed(() => workflowStore.edges.length)
 const availableWorkflows = computed(() => workflowStore.availableWorkflows)
+const filteredWorkflowsToLoad = computed(() => availableWorkflows.value.filter((item) => item.owner_dept_id === workflowStore.ownerDeptId))
 const compileErrors = computed(() => workflowStore.compileResult?.compile_errors ?? [])
 const showSensorSandbox = computed(() => workflowStore.nodes.some((node) => node.type === 'sensor_agent'))
 const canInjectMockEvent = computed(() => {

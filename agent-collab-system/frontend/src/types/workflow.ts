@@ -69,6 +69,7 @@ export interface DepartmentTableTargetConfig {
   provider: string
   operation: 'append_row' | 'upsert_row' | 'update_row'
   dept_route_mode: 'current_dept' | 'fixed_dept' | 'derived'
+  fixed_dept_id?: string
   idempotency_key_template?: string
   row_mapping?: Record<string, string>
   default_values?: Record<string, string>
@@ -81,6 +82,7 @@ export interface ExecutionNodeConfig {
   approval_mode?: 'always' | 'risk_based' | 'never'
   approval_required?: boolean
   result_delivery?: 'chat' | 'event' | 'monitor'
+  result_target_dept_id?: string
 }
 
 export interface SensorConditionConfig {
@@ -151,9 +153,16 @@ export interface DecisionNodeConfig {
   description?: string
   decision_mode?: 'rule' | 'model' | 'llm'
   rule_set_ref?: string
+  rule_config?: Record<string, unknown>
+  model_type?: 'scorecard' | 'capacity_planner' | 'risk_balancer'
+  model_ref?: string
+  model_params?: Record<string, unknown>
   optimization_goal?: string
   constraints?: string[]
   prompt_template?: string
+  output_template?: string
+  include_explanation?: boolean
+  include_citations?: boolean
   rag_refs?: string[]
 }
 

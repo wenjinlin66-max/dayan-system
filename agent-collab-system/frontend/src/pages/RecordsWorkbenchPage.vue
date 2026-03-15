@@ -63,9 +63,15 @@
       </section>
 
       <aside class="rounded-[28px] border border-slate-200/80 bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] p-4 shadow-[0_22px_60px_rgba(15,23,42,0.08)]">
-        <div class="text-[11px] uppercase tracking-[0.24em] text-violet-700/70">Recent Trigger Stream</div>
-        <div class="mt-3 space-y-3">
-          <div v-for="event in recentEvents" :key="event.change_event_id" class="rounded-[22px] border border-slate-200 bg-white/90 p-3">
+        <div class="flex items-center justify-between gap-3">
+          <div class="text-[11px] uppercase tracking-[0.24em] text-violet-700/70">Recent Trigger Stream</div>
+        </div>
+        <div class="mt-3 max-h-[620px] space-y-3 overflow-y-auto pr-1">
+          <div
+            v-for="event in recentEvents"
+            :key="event.change_event_id"
+            class="w-full rounded-[22px] border border-slate-200 bg-white/90 p-3 text-left transition hover:border-violet-200 hover:bg-violet-50/40"
+          >
             <div class="flex items-center justify-between gap-3">
               <div class="text-sm font-semibold text-slate-900">{{ event.table_name }}</div>
               <span class="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] text-violet-700">{{ event.operation }}</span>
@@ -112,6 +118,7 @@
         </div>
       </template>
     </el-dialog>
+
   </div>
 </template>
 
@@ -140,7 +147,6 @@ const editorVisible = ref(false)
 const editingMode = ref<'create' | 'edit'>('create')
 const editingRecordId = ref('')
 const draftValues = reactive<Record<string, string | number>>({})
-
 const tables = computed(() => recordsStore.tables)
 const rows = computed(() => recordsStore.currentRows)
 const currentTable = computed(() => recordsStore.currentTable)

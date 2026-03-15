@@ -38,18 +38,23 @@ const edgeStyle = computed(() => ({
   strokeWidth: props.selected ? 2.6 : 2,
 }))
 
-const [edgePath, labelX, labelY] = getBezierPath({
-  sourceX: props.sourceX,
-  sourceY: props.sourceY,
-  targetX: props.targetX,
-  targetY: props.targetY,
-  sourcePosition: props.sourcePosition,
-  targetPosition: props.targetPosition,
+const edgeGeometry = computed(() => {
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX: props.sourceX,
+    sourceY: props.sourceY,
+    targetX: props.targetX,
+    targetY: props.targetY,
+    sourcePosition: props.sourcePosition,
+    targetPosition: props.targetPosition,
+  })
+  return { path, labelX, labelY }
 })
+
+const edgePath = computed(() => edgeGeometry.value.path)
 
 const labelStyle = computed<CSSProperties>(() => ({
   pointerEvents: 'all',
-  transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+  transform: `translate(-50%, -50%) translate(${edgeGeometry.value.labelX}px, ${edgeGeometry.value.labelY}px)`,
 }))
 
 const handleDelete = () => {

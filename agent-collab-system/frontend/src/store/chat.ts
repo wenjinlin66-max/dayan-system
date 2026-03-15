@@ -26,6 +26,13 @@ export const useChatStore = defineStore('chat', {
         this.currentDeptId = items[0].dept_id
       }
     },
+    removeSession(sessionId: string) {
+      this.sessions = this.sessions.filter((item) => item.session_id !== sessionId)
+      if (this.currentSessionId === sessionId) {
+        this.currentSessionId = this.sessions[0]?.session_id ?? ''
+        this.currentDeptId = this.sessions[0]?.dept_id ?? this.currentDeptId
+      }
+    },
     setCurrentSession(sessionId: string) {
       this.currentSessionId = sessionId
       const matched = this.sessions.find((item) => item.session_id === sessionId)

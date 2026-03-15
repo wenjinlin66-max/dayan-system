@@ -4,6 +4,8 @@ export const createChatSession = async (title?: string) => http.post('/v1/chat/s
 
 export const fetchChatSessions = async () => http.get('/v1/chat/sessions')
 
+export const deleteChatSession = async (sessionId: string) => http.delete(`/v1/chat/sessions/${sessionId}`)
+
 export const sendChatMessage = async (sessionId: string, content: string) =>
   http.post(`/v1/chat/sessions/${sessionId}/messages`, { content, message_type: 'text' })
 

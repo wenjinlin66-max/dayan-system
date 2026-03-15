@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 
 import type { WorkflowCompileResult, WorkflowEdge, WorkflowNode, WorkflowSummary, WorkflowUiSchema } from '@/types/workflow'
 import type { WorkflowCategoryValue } from '@/utils/workflowCategory'
+import type { ErpDepartmentValue } from '@/utils/erpDepartments'
 
 const generateDefaultWorkflowCode = () => `wf_canvas_${Date.now().toString(36)}`
 const DEFAULT_WORKFLOW_NAME = '示例对话指令流'
@@ -18,6 +19,7 @@ export const useWorkflowStore = defineStore('workflow', {
     currentWorkflowId: '' as string,
     workflowCode: '' as string,
     workflowName: DEFAULT_WORKFLOW_NAME as string,
+    ownerDeptId: 'production' as ErpDepartmentValue,
     workflowCategory: 'dialog_trigger' as WorkflowCategoryValue,
     nodes: [] as WorkflowNode[],
     edges: [] as WorkflowEdge[],
@@ -89,6 +91,7 @@ export const useWorkflowStore = defineStore('workflow', {
       this.currentWorkflowId = ''
       this.workflowCode = ''
       this.workflowName = DEFAULT_WORKFLOW_NAME
+      this.ownerDeptId = 'production'
       this.workflowCategory = 'dialog_trigger'
       this.selectedNodeId = ''
       this.selectedEdgeId = ''
@@ -224,6 +227,7 @@ export const useWorkflowStore = defineStore('workflow', {
       this.currentWorkflowId = payload.summary.workflow_id
       this.workflowCode = payload.summary.code
       this.workflowName = payload.summary.name
+      this.ownerDeptId = payload.summary.owner_dept_id as ErpDepartmentValue
       this.workflowCategory = (payload.summary.workflow_trigger_type as WorkflowCategoryValue) || 'dialog_trigger'
       const clonedNodes = structuredClone(payload.draft.ui_schema.nodes)
       const clonedEdges = structuredClone(payload.draft.ui_schema.edges)
@@ -241,7 +245,7 @@ export const useWorkflowStore = defineStore('workflow', {
       this.currentRelease = releaseSnapshot
       this.versions = versionSnapshots
     },
-    setWorkflowMeta(payload: { name?: string; code?: string; workflowId?: string; workflowCategory?: WorkflowCategoryValue }) {
+    setWorkflowMeta(payload: { name?: string; code?: string; workflowId?: string; workflowCategory?: WorkflowCategoryValue; ownerDeptId?: ErpDepartmentValue }) {
       if (payload.name !== undefined) {
         this.workflowName = payload.name
         this.markDirty()
@@ -255,6 +259,11 @@ export const useWorkflowStore = defineStore('workflow', {
       }
       if (payload.workflowCategory !== undefined) {
         this.workflowCategory = payload.workflowCategory
+        this.markDirty()
+      }
+      if (payload.ownerDeptId !== undefined) {
+        this.ownerDeptId = payload.ownerDeptId
+        this.markDirty()
       }
     },
     setVersions(versions: WorkflowCompileResult[]) {

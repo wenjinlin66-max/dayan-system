@@ -30,23 +30,38 @@
               :workflow="item"
               source="catalog"
             />
-            <el-button class="mt-3" size="small" plain :loading="startingWorkflowId === item.workflow_id" @click="startWorkflow(item)">
-              {{ item.required_inputs?.length ? '填写参数并启动' : '启动该流程' }}
-            </el-button>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <el-button size="small" plain :loading="startingWorkflowId === item.workflow_id" @click="startWorkflow(item)">
+                {{ item.required_inputs?.length ? '填写参数并启动' : '启动该流程' }}
+              </el-button>
+              <el-button size="small" @click="openHistory(item)">执行历史</el-button>
+            </div>
           </div>
         </div>
       </section>
 
       <div v-if="catalog.length === 0" class="text-xs text-slate-500">当前部门还没有已发布 workflow。</div>
     </div>
+
+    <WorkflowExecutionHistoryDialog
+      :visible="historyVisible"
+      :loading="historyLoading"
+      :title="historyTitle"
+      :items="historyItems"
+      @close="historyVisible = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 
+import { fetchWorkflowExecutionHistory } from '@/api/executions'
+import WorkflowExecutionHistoryDialog from '@/components/shared/WorkflowExecutionHistoryDialog.vue'
 import { useChatSession } from '@/composables/useChatSession'
 import { useChatStore } from '@/store/chat'
+import type { WorkflowExecutionHistoryItem } from '@/types/execution'
 import type { WorkflowCatalogItem } from '@/types/chat'
 import { getWorkflowCategoryLabel } from '@/utils/workflowCategory'
 import WorkflowParameterCard from './WorkflowParameterCard.vue'
@@ -56,6 +71,10 @@ const catalog = computed(() => chatStore.catalog)
 const startingWorkflowId = computed(() => chatStore.startingWorkflowId)
 const { startSelectedWorkflow } = useChatSession()
 const expandedWorkflowId = ref('')
+const historyVisible = ref(false)
+const historyLoading = ref(false)
+const historyTitle = ref('')
+const historyItems = ref<WorkflowExecutionHistoryItem[]>([])
 
 const groupedCatalog = computed(() => {
   const groups = new Map<string, WorkflowCatalogItem[]>()
@@ -75,5 +94,20 @@ const startWorkflow = async (workflow: WorkflowCatalogItem) => {
     return
   }
   await startSelectedWorkflow(workflow.workflow_id, 'catalog')
+}
+
+const openHistory = async (workflow: WorkflowCatalogItem) => {
+  historyVisible.value = true
+  historyLoading.value = true
+  historyTitle.value = `${workflow.title} · 部门执行历史`
+  try {
+    const response = await fetchWorkflowExecutionHistory(workflow.workflow_id)
+    historyItems.value = response.data.items
+  } catch (error) {
+    historyItems.value = []
+    ElMessage.error(error instanceof Error ? error.message : `加载执行历史失败：${String(error)}`)
+  } finally {
+    historyLoading.value = false
+  }
 }
 </script>

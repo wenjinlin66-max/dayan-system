@@ -22,10 +22,14 @@ export const useExecutionStream = () => {
   const startPolling = (executionId: string) => {
     chatStore.setStreamFallback(true)
     currentPollTimer = window.setInterval(async () => {
-      const response = await fetchExecution(executionId)
-      const payload = response.data as ExecutionStatus
-      chatStore.setLatestExecution(payload)
-      if (payload.status === 'finished' || payload.status === 'failed' || payload.status === 'cancelled') {
+      try {
+        const response = await fetchExecution(executionId)
+        const payload = response.data as ExecutionStatus
+        chatStore.setLatestExecution(payload)
+        if (payload.status === 'finished' || payload.status === 'failed' || payload.status === 'cancelled') {
+          stop()
+        }
+      } catch {
         stop()
       }
     }, 2000)

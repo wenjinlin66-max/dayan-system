@@ -5,8 +5,6 @@ import {
   compileWorkflow,
   createWorkflow,
   deleteWorkflow,
-  fetchCurrentRelease,
-  fetchLatestDraft,
   fetchWorkflows,
   fetchWorkflowVersions,
   publishWorkflow,
@@ -53,6 +51,7 @@ export const useWorkflowPublish = () => {
       name: workflowStore.workflowName,
       code: workflowStore.workflowCode,
       visibility: 'private',
+      owner_dept_id: workflowStore.ownerDeptId,
       ui_schema: workflowStore.uiSchema,
     })
     workflowStore.setWorkflowMeta({ workflowId: response.data.workflow_id })
@@ -63,7 +62,7 @@ export const useWorkflowPublish = () => {
     if (!workflowStore.currentWorkflowId) {
       return
     }
-    const versionsRes = await fetchWorkflowVersions(workflowStore.currentWorkflowId)
+    const versionsRes = await fetchWorkflowVersions(workflowStore.currentWorkflowId, { dept_id: workflowStore.ownerDeptId })
     const versions = versionsRes.data.versions
     const releaseFromVersions = versions.find((item: { is_current_release: boolean }) => item.is_current_release) ?? null
 
@@ -72,34 +71,45 @@ export const useWorkflowPublish = () => {
   }
 
   const refreshWorkflowList = async () => {
-    const res = await fetchWorkflows()
+    const res = await fetchWorkflows({ include_all: true })
     workflowStore.setAvailableWorkflows(res.data)
   }
 
   const loadWorkflow = async (workflowId: string) => {
     await withActionLock('load', async () => {
       const requestedWorkflowId = workflowId
-      const list = workflowStore.availableWorkflows.length > 0 ? workflowStore.availableWorkflows : (await fetchWorkflows()).data
+      const list = workflowStore.availableWorkflows.length > 0 ? workflowStore.availableWorkflows : (await fetchWorkflows({ include_all: true })).data
       const summary = list.find((item: { workflow_id: string }) => item.workflow_id === requestedWorkflowId)
       if (!summary) {
         ElMessage.error('未找到对应 workflow')
         return
       }
 
-      const [draftRes, versionsRes] = await Promise.allSettled([fetchLatestDraft(requestedWorkflowId), fetchWorkflowVersions(requestedWorkflowId)])
+      const deptId = summary.owner_dept_id
+      workflowStore.setWorkflowMeta({ ownerDeptId: summary.owner_dept_id as typeof workflowStore.ownerDeptId })
+      const versions = (await fetchWorkflowVersions(requestedWorkflowId, { dept_id: deptId })).data.versions
 
-      if (draftRes.status !== 'fulfilled' || versionsRes.status !== 'fulfilled') {
+      if (!versions.length) {
         ElMessage.error('加载 workflow 失败')
         return
       }
 
-      const release = versionsRes.value.data.versions.find((item: { is_current_release: boolean }) => item.is_current_release) ?? null
+      const release = versions.find((item: { is_current_release: boolean }) => item.is_current_release) ?? null
+      const draftFromVersions = versions
+        .filter((item: { mode: string }) => item.mode === 'draft')
+        .sort((left: { version: number }, right: { version: number }) => right.version - left.version)[0] ?? null
+      const hydratedDraft = draftFromVersions ?? release
+
+      if (!hydratedDraft) {
+        ElMessage.error('未找到可恢复的 workflow 草稿或发布版本')
+        return
+      }
 
       workflowStore.loadWorkflow({
         summary,
-        draft: draftRes.value.data,
+        draft: hydratedDraft,
         release,
-        versions: versionsRes.value.data.versions,
+        versions,
       })
     })
   }
@@ -111,7 +121,7 @@ export const useWorkflowPublish = () => {
         const response = await saveWorkflowDraft(workflowId, {
           name: workflowStore.workflowName,
           ui_schema: mapCanvasToDsl(workflowStore.nodes, workflowStore.edges),
-        })
+        }, { dept_id: workflowStore.ownerDeptId })
         workflowStore.setDraftSnapshot(response.data)
         await refreshVersions()
         ElMessage.success('草稿已保存')
@@ -128,8 +138,8 @@ export const useWorkflowPublish = () => {
         await saveWorkflowDraft(workflowId, {
           name: workflowStore.workflowName,
           ui_schema: mapCanvasToDsl(workflowStore.nodes, workflowStore.edges),
-        })
-        const response = await compileWorkflow(workflowId)
+        }, { dept_id: workflowStore.ownerDeptId })
+        const response = await compileWorkflow(workflowId, { dept_id: workflowStore.ownerDeptId })
         workflowStore.setCompileResult(response.data)
         await refreshVersions()
         if (response.data.compile_status === 'success') {
@@ -154,6 +164,7 @@ export const useWorkflowPublish = () => {
         const response = await publishWorkflow(workflowId, {
           category: workflowStore.workflowCategory,
           summary: `${workflowStore.workflowName} 最小闭环流程`,
+          dept_id: workflowStore.ownerDeptId,
         })
         workflowStore.setCurrentRelease(response.data)
         await refreshVersions()
@@ -169,7 +180,8 @@ export const useWorkflowPublish = () => {
       return
     }
     await withActionLock('load', async () => {
-      await deleteWorkflow(workflowId)
+      const matched = workflowStore.availableWorkflows.find((item) => item.workflow_id === workflowId)
+      await deleteWorkflow(workflowId, { dept_id: matched?.owner_dept_id ?? workflowStore.ownerDeptId })
       if (workflowStore.currentWorkflowId === workflowId) {
         workflowStore.resetWorkflowEditor()
         workflowStore.ensureDraftMeta()

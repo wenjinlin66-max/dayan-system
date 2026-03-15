@@ -57,9 +57,19 @@
           <el-option label="固定部门" value="fixed_dept" />
           <el-option label="从上下文推导" value="derived" />
         </el-select>
+        <el-select v-if="deptRouteMode === 'fixed_dept'" v-model="fixedDeptId" placeholder="固定目标部门">
+          <el-option v-for="item in targetDeptOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
       </div>
       <div class="mt-3">
         <el-input v-model="idempotencyKeyTemplate" placeholder="幂等键模板，如 {{dept_id}}:{{execution_id}}:{{node_id}}" />
+      </div>
+      <div v-if="resultDelivery === 'chat'" class="mt-3">
+        <div class="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">结果回传部门</div>
+        <el-select v-model="resultTargetDeptId" class="w-full" placeholder="默认当前执行部门对话框">
+          <el-option label="当前执行部门对话框" value="" />
+          <el-option v-for="item in targetDeptOptions" :key="`result-${item.value}`" :label="item.label" :value="item.value" />
+        </el-select>
       </div>
     </section>
 
@@ -93,6 +103,7 @@
 import { computed } from 'vue'
 
 import type { ExecutionNodeConfig } from '@/types/workflow'
+import { ERP_DEPARTMENT_OPTIONS } from '@/utils/erpDepartments'
 
 const props = defineProps<{
   modelValue: Record<string, unknown>
@@ -119,6 +130,8 @@ const resultDeliveryOptions = [
   { label: '监控台', value: 'monitor' },
 ]
 
+const targetDeptOptions = ERP_DEPARTMENT_OPTIONS.filter((item) => item.value !== 'ceo')
+
 const currentConfig = computed<ExecutionNodeConfig>(() => {
   const config = props.modelValue as ExecutionNodeConfig
   return {
@@ -127,6 +140,7 @@ const currentConfig = computed<ExecutionNodeConfig>(() => {
     approval_mode: config.approval_mode ?? 'risk_based',
     approval_required: config.approval_required ?? true,
     result_delivery: config.result_delivery ?? 'chat',
+    result_target_dept_id: typeof config.result_target_dept_id === 'string' ? config.result_target_dept_id : '',
     execution_targets:
       config.execution_targets?.length
         ? config.execution_targets
@@ -137,6 +151,7 @@ const currentConfig = computed<ExecutionNodeConfig>(() => {
               provider: 'bitable',
               operation: 'append_row',
               dept_route_mode: 'current_dept',
+              fixed_dept_id: '',
               idempotency_key_template: '{{dept_id}}:{{execution_id}}:{{node_id}}',
               row_mapping: {},
               default_values: {},
@@ -182,6 +197,7 @@ const updateTarget = (patch: Record<string, unknown>) => {
     provider: 'bitable',
     operation: 'append_row',
     dept_route_mode: 'current_dept',
+    fixed_dept_id: '',
   }
   updateConfig({
     execution_targets: [
@@ -217,6 +233,16 @@ const deptRouteMode = computed({
 const idempotencyKeyTemplate = computed({
   get: () => primaryTarget.value?.idempotency_key_template ?? '{{dept_id}}:{{execution_id}}:{{node_id}}',
   set: (value: string) => updateTarget({ idempotency_key_template: value }),
+})
+
+const fixedDeptId = computed({
+  get: () => primaryTarget.value?.fixed_dept_id ?? '',
+  set: (value: string) => updateTarget({ fixed_dept_id: value }),
+})
+
+const resultTargetDeptId = computed({
+  get: () => currentConfig.value.result_target_dept_id ?? '',
+  set: (value: string) => updateConfig({ result_target_dept_id: value || undefined }),
 })
 
 const encodeMappingText = (value?: Record<string, string>) =>

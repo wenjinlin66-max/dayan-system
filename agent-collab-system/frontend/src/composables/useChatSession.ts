@@ -1,7 +1,7 @@
 import { ElMessage } from 'element-plus'
 
 import { useApprovals } from '@/composables/useApprovals'
-import { createChatSession, fetchChatMessages, fetchChatSessions, fetchWorkflowCatalog, sendChatMessage, startWorkflowFromChat } from '@/api/chat'
+import { createChatSession, deleteChatSession, fetchChatMessages, fetchChatSessions, fetchWorkflowCatalog, sendChatMessage, startWorkflowFromChat } from '@/api/chat'
 import { fetchExecution } from '@/api/executions'
 import { useChatStore } from '@/store/chat'
 import { useExecutionStream } from '@/composables/useExecutionStream'
@@ -12,16 +12,12 @@ export const useChatSession = () => {
   const approvals = useApprovals()
 
   const initialize = async () => {
-    const sessionsRes = await fetchChatSessions()
-    chatStore.setSessions(sessionsRes.data)
-    if (sessionsRes.data.length > 0) {
-      chatStore.setCurrentDept(sessionsRes.data[0].dept_id)
-    }
+    const sessionsRes = await refreshSessions()
 
     let sessionId = chatStore.currentSessionId
     if (!sessionId) {
-      if (sessionsRes.data.length > 0) {
-        sessionId = sessionsRes.data[0].session_id
+      if (sessionsRes.length > 0) {
+        sessionId = sessionsRes[0].session_id
       } else {
         const created = await createChatSession('当前部门主对话框')
         sessionId = created.data.session_id
@@ -43,6 +39,33 @@ export const useChatSession = () => {
     const created = await createChatSession(title)
     chatStore.setSessions([created.data, ...chatStore.sessions])
     await selectSession(created.data.session_id)
+  }
+
+  const refreshSessions = async () => {
+    const sessionsRes = await fetchChatSessions()
+    chatStore.setSessions(sessionsRes.data)
+    if (sessionsRes.data.length > 0 && !chatStore.currentDeptId) {
+      chatStore.setCurrentDept(sessionsRes.data[0].dept_id)
+    }
+    return sessionsRes.data
+  }
+
+  const deleteSession = async (sessionId: string) => {
+    await deleteChatSession(sessionId)
+    const deletingCurrent = chatStore.currentSessionId === sessionId
+    chatStore.removeSession(sessionId)
+
+    if (chatStore.sessions.length === 0) {
+      await createSession('新的部门对话会话')
+      return
+    }
+
+    if (deletingCurrent && chatStore.currentSessionId) {
+      await selectSession(chatStore.currentSessionId)
+      return
+    }
+
+    await Promise.all([loadCatalog(), approvals.loadApprovalTasks()])
   }
 
   const loadMessages = async (sessionId: string) => {
@@ -78,7 +101,7 @@ export const useChatSession = () => {
         chatStore.setLatestExecution(executionRes.data)
         executionStream.start(res.data.related_execution_id)
       }
-      await Promise.all([loadMessages(chatStore.currentSessionId), loadCatalog(), approvals.loadApprovalTasks()])
+      await Promise.all([loadMessages(chatStore.currentSessionId), loadCatalog(), approvals.loadApprovalTasks(), refreshSessions()])
     } catch (error) {
       ElMessage.error(`发送消息失败：${String(error)}`)
     } finally {
@@ -91,6 +114,7 @@ export const useChatSession = () => {
     initialize,
     selectSession,
     createSession,
+    deleteSession,
     sendMessage,
     loadMessages,
     loadCatalog,
@@ -118,7 +142,7 @@ export const useChatSession = () => {
           chatStore.setLatestExecution(executionRes.data)
           executionStream.start(res.data.related_execution_id)
         }
-        await Promise.all([loadMessages(chatStore.currentSessionId), approvals.loadApprovalTasks()])
+        await Promise.all([loadMessages(chatStore.currentSessionId), approvals.loadApprovalTasks(), refreshSessions()])
       } catch (error) {
         ElMessage.error(`启动 workflow 失败：${String(error)}`)
       } finally {
