@@ -10,6 +10,7 @@ class WorkflowCreateRequest(BaseModel):
     name: str = Field(min_length=1)
     code: str = Field(min_length=1)
     visibility: str = "private"
+    owner_dept_id: str | None = None
     ui_schema: dict[str, object] = Field(default_factory=dict)
 
 

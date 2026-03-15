@@ -81,3 +81,13 @@ class MockRecordsRepository:
     async def list_recent_events(self, limit: int = 20) -> list[SensorChangeLogRecord]:
         result = await self.session.execute(select(SensorChangeLogRecord).order_by(SensorChangeLogRecord.created_at.desc()).limit(limit))
         return list(result.scalars().all())
+
+    async def remove_execution_references(self, execution_id: str) -> None:
+        result = await self.session.execute(select(SensorChangeLogRecord).where(SensorChangeLogRecord.triggered_execution_ids.is_not(None)))
+        logs = list(result.scalars().all())
+        for log in logs:
+            current_ids = list(log.triggered_execution_ids or [])
+            next_ids = [item for item in current_ids if item != execution_id]
+            if next_ids != current_ids:
+                log.triggered_execution_ids = next_ids
+        await self.session.flush()

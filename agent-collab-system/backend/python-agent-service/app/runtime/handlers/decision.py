@@ -1,18 +1,30 @@
 from __future__ import annotations
 
+import httpx
+from math import ceil
+
 from typing import cast
 
 from app.domain.memory.service import MemoryService, RuntimeMemoryBundle
+from app.integrations.llm.client import LLMClient
 from app.runtime.models import JsonValue, NodeExecutionResult, RuntimeNode, RuntimeState
 
 
 class DecisionNodeHandler:
+    llm_client: LLMClient
+
+    def __init__(self, llm_client: LLMClient | None = None) -> None:
+        self.llm_client = llm_client or LLMClient.from_settings()
+
     async def execute(self, node: RuntimeNode, state: RuntimeState, next_nodes: list[str]) -> NodeExecutionResult:
         memory = MemoryService.bind_runtime(state)
         input_values = state.input_payload.get("input_values")
-        payload = cast(dict[str, JsonValue], input_values) if isinstance(input_values, dict) else state.input_payload
+        payload = self._resolve_decision_payload(
+            cast(dict[str, JsonValue], input_values) if isinstance(input_values, dict) else state.input_payload,
+            state=state,
+        )
         decision_mode = str(node.config.get("decision_mode") or "rule")
-        decision_output = self._build_decision_output(node, payload, state, decision_mode, memory)
+        decision_output = await self._build_decision_output(node, payload, state, decision_mode, memory)
         state.decision_outputs[node.id] = cast(dict[str, object], decision_output)
         memory.context.set_context("latest_decision_node", node.id)
         history_record: dict[str, JsonValue] = {
@@ -27,7 +39,7 @@ class DecisionNodeHandler:
         memory.history.write_history(history_record)
         return NodeExecutionResult(next_node_id=next_nodes[0] if next_nodes else None)
 
-    def _build_decision_output(
+    async def _build_decision_output(
         self,
         node: RuntimeNode,
         payload: dict[str, JsonValue],
@@ -38,39 +50,64 @@ class DecisionNodeHandler:
         if decision_mode == "model":
             return self._build_model_output(node, payload, state)
         if decision_mode == "llm":
-            return self._build_llm_output(node, payload, state, memory)
+            return await self._build_llm_output(node, payload, state, memory)
         return self._build_rule_output(node, payload, state)
 
     @staticmethod
-    def _build_rule_output(node: RuntimeNode, payload: dict[str, JsonValue], state: RuntimeState) -> dict[str, JsonValue]:
+    def _resolve_decision_payload(payload: dict[str, JsonValue], *, state: RuntimeState) -> dict[str, JsonValue]:
         latest_sensor = next(reversed(state.sensor_outputs.values()), None)
-        sensor_payload = payload
         if isinstance(latest_sensor, dict):
             raw_sensor_payload = latest_sensor.get("payload")
             if isinstance(raw_sensor_payload, dict):
-                sensor_payload = cast(dict[str, JsonValue], raw_sensor_payload)
-        base_payload = sensor_payload if sensor_payload else payload
-        target_item = base_payload.get("item_id") or base_payload.get("target_item_id") or "unknown-item"
-        recommended_quantity = base_payload.get("recommended_quantity") or base_payload.get("quantity") or 100
+                merged: dict[str, JsonValue] = dict(cast(dict[str, JsonValue], raw_sensor_payload))
+                merged.update(payload)
+                return merged
+        return payload
+
+    @staticmethod
+    def _build_rule_output(node: RuntimeNode, payload: dict[str, JsonValue], state: RuntimeState) -> dict[str, JsonValue]:
+        _ = state
+        base_payload = payload
+        rule_config = DecisionNodeHandler._object_dict(node.config.get("rule_config"))
+        severity_thresholds = DecisionNodeHandler._float_dict(rule_config.get("severity_thresholds"), {"high": 0.3, "medium": 0.8, "low": 1.0})
+        target_item_field = DecisionNodeHandler._string_value(rule_config.get("target_item_field"), default="item_id")
+        quantity_field = DecisionNodeHandler._string_value(rule_config.get("quantity_field"), default="recommended_quantity")
+        severity_field = DecisionNodeHandler._string_value(rule_config.get("severity_field"), default="severity")
+        action_type = DecisionNodeHandler._string_value(rule_config.get("action_type"), default="create_department_table_record")
+
+        current_stock = DecisionNodeHandler._number_value(base_payload.get("stock_count") or base_payload.get("current_stock"))
+        safety_limit = DecisionNodeHandler._number_value(base_payload.get("safety_limit") or base_payload.get("target_stock"))
+        explicit_quantity = DecisionNodeHandler._number_value(base_payload.get(quantity_field) or payload.get(quantity_field))
+        gap = max((safety_limit or 0) - (current_stock or 0), 0)
+        recommended_quantity = int(explicit_quantity or max(ceil(gap * 1.5), 100))
+        ratio = ((current_stock or 0) / safety_limit) if current_stock is not None and safety_limit not in (None, 0) else None
+        severity = DecisionNodeHandler._resolve_severity(ratio, severity_thresholds)
+        target_item = base_payload.get(target_item_field) or base_payload.get("target_item_id") or "unknown-item"
+
         return {
             "decision_mode": "rule",
-            "decision_summary": f"{node.name} 根据规则判断建议发起执行",
+            "decision_summary": f"{node.name} 根据规则集 {str(node.config.get('rule_set_ref') or 'default_rule_set')} 生成执行建议",
             "decision_payload": {
-                "severity": "medium",
+                severity_field: severity,
                 "target_item_id": target_item,
+                "current_stock": current_stock,
+                "safety_limit": safety_limit,
+                "gap": gap,
                 "recommended_quantity": recommended_quantity,
+                "rule_set_ref": str(node.config.get("rule_set_ref") or "default_rule_set"),
             },
-            "risk_level": "medium",
+            "risk_level": severity if severity in {"low", "medium"} else "high",
             "recommended_actions": [
                 {
-                    "action_type": "create_department_table_record",
+                    "action_type": action_type,
                     "params": {
                         "item_id": target_item,
                         "quantity": recommended_quantity,
+                        severity_field: severity,
                     },
                 }
             ],
-            "explanation": "根据当前输入与感知结果命中规则，生成结构化执行建议。",
+            "explanation": f"根据库存/阈值规则判断当前缺口为 {gap}，库存比例为 {ratio if ratio is not None else 'unknown'}，因此输出 {severity} 级决策。",
             "citations": [],
         }
 
@@ -78,33 +115,75 @@ class DecisionNodeHandler:
     def _build_model_output(node: RuntimeNode, payload: dict[str, JsonValue], state: RuntimeState) -> dict[str, JsonValue]:
         optimization_goal = str(node.config.get("optimization_goal") or "balance_cost_and_efficiency")
         raw_constraints = node.config.get("constraints")
-        constraints: list[object] = cast(list[object], raw_constraints) if isinstance(raw_constraints, list) else []
+        constraints = [item for item in cast(list[object], raw_constraints)] if isinstance(raw_constraints, list) else []
+        model_type = str(node.config.get("model_type") or "scorecard")
+        model_ref = str(node.config.get("model_ref") or f"{model_type}.default")
+        model_params = DecisionNodeHandler._object_dict(node.config.get("model_params"))
+        objective_weights = DecisionNodeHandler._float_dict(model_params.get("objective_weights"), {
+            "cost": 0.35,
+            "timeliness": 0.4,
+            "stability": 0.25,
+        })
+        capacity_limits = DecisionNodeHandler._float_dict(model_params.get("capacity_limits"), {
+            "max_quantity": 500,
+            "min_quantity": 20,
+        })
+        candidate_actions = DecisionNodeHandler._string_list(model_params.get("candidate_actions"), [
+            "append_row",
+            "request_approval",
+            "notify_manager",
+        ])
         target_item = payload.get("item_id") or payload.get("target_item_id") or state.context.get("target_item_id") or "unknown-item"
+        current_stock = DecisionNodeHandler._number_value(payload.get("stock_count") or state.context.get("stock_count"))
+        safety_limit = DecisionNodeHandler._number_value(payload.get("safety_limit") or state.context.get("safety_limit"))
+        demand_gap = max((safety_limit or 0) - (current_stock or 0), 0)
+        demand_pressure = min(demand_gap / max(safety_limit or 1, 1), 2.0)
+        recommended_quantity = DecisionNodeHandler._clamp_quantity(
+            int(ceil(max(demand_gap, 20) * DecisionNodeHandler._model_factor(model_type, optimization_goal))),
+            minimum=int(capacity_limits.get("min_quantity", 20)),
+            maximum=int(capacity_limits.get("max_quantity", 500)),
+        )
+        best_action, action_scores = DecisionNodeHandler._score_candidate_actions(
+            candidate_actions=candidate_actions,
+            objective_weights=objective_weights,
+            optimization_goal=optimization_goal,
+            demand_pressure=demand_pressure,
+        )
+        risk_level = "high" if demand_pressure >= 1 else "medium" if demand_pressure >= 0.45 else "low"
         return {
             "decision_mode": "model",
-            "decision_summary": f"{node.name} 基于模型配置完成一次优化决策",
+            "decision_summary": f"{node.name} 基于 {model_ref} 完成 {optimization_goal} 优化决策",
             "decision_payload": {
                 "target_item_id": target_item,
+                "model_type": model_type,
+                "model_ref": model_ref,
                 "optimization_goal": optimization_goal,
                 "constraint_count": len(constraints),
-                "recommended_quantity": 120,
+                "current_stock": current_stock,
+                "safety_limit": safety_limit,
+                "demand_pressure": round(demand_pressure, 3),
+                "recommended_quantity": recommended_quantity,
+                "best_action": best_action,
+                "action_scores": action_scores,
             },
-            "risk_level": "low",
+            "risk_level": risk_level,
             "recommended_actions": [
                 {
-                    "action_type": "optimize_replenishment",
+                    "action_type": best_action,
                     "params": {
                         "item_id": target_item,
                         "optimization_goal": optimization_goal,
+                        "recommended_quantity": recommended_quantity,
+                        "model_ref": model_ref,
                     },
                 }
             ],
-            "explanation": "当前为模型型决策骨架，已根据优化目标和约束生成标准化输出。",
+            "explanation": f"基于目标权重 {objective_weights}、候选动作 {candidate_actions} 与需求压力 {round(demand_pressure, 3)} 计算优先级，选择 {best_action}。",
             "citations": [],
         }
 
-    @staticmethod
-    def _build_llm_output(
+    async def _build_llm_output(
+        self,
         node: RuntimeNode,
         payload: dict[str, JsonValue],
         state: RuntimeState,
@@ -112,37 +191,359 @@ class DecisionNodeHandler:
     ) -> dict[str, JsonValue]:
         _ = state
         prompt_template = str(node.config.get("prompt_template") or "")
+        optimization_goal = str(node.config.get("optimization_goal") or "balance_cost_and_explainability")
+        constraints = DecisionNodeHandler._string_list(node.config.get("constraints"), [])
+        output_template = str(node.config.get("output_template") or "decision.result.v1")
+        include_explanation = bool(node.config.get("include_explanation", True))
+        include_citations = bool(node.config.get("include_citations", True))
         query = str(payload.get("message") or payload.get("query") or node.name)
+        target_item_id = payload.get("item_id") or payload.get("target_item_id") or state.context.get("target_item_id") or "unknown-item"
+        current_stock = DecisionNodeHandler._number_value(payload.get("stock_count") or state.context.get("stock_count"))
+        safety_limit = DecisionNodeHandler._number_value(payload.get("safety_limit") or state.context.get("safety_limit"))
+        recommended_quantity = int(max(ceil(max((safety_limit or 0) - (current_stock or 0), 0) * 1.2), 20))
         rag_refs_raw = node.config.get("rag_refs")
         rag_refs = [item for item in cast(list[object], rag_refs_raw)] if isinstance(rag_refs_raw, list) else []
         rag_scopes = [item for item in rag_refs if isinstance(item, str)]
         knowledge_hits = memory.knowledge.search_knowledge(query, scopes=rag_scopes)
         history_hits = memory.history.search_history(query, agent_type="decision_agent")
-        return {
-            "decision_mode": "llm",
-            "decision_summary": f"{node.name} 结合知识记忆生成一次智能决策建议",
-            "decision_payload": {
-                "query": query,
-                "prompt_template": prompt_template,
-                "knowledge_hit_count": len(knowledge_hits),
-                "history_hit_count": len(history_hits),
-                "recommended_quantity": 150,
+        fallback = cast(
+            dict[str, JsonValue],
+            {
+                "decision_mode": "llm",
+                "decision_summary": f"{node.name} 结合知识记忆生成一次智能决策建议",
+                "decision_payload": {
+                    "query": query,
+                    "target_item_id": target_item_id,
+                    "current_stock": current_stock,
+                    "safety_limit": safety_limit,
+                    "prompt_template": prompt_template,
+                    "optimization_goal": optimization_goal,
+                    "output_template": output_template,
+                    "knowledge_hit_count": len(knowledge_hits),
+                    "history_hit_count": len(history_hits),
+                    "recommended_quantity": recommended_quantity,
+                    "decision_basis": "fallback_from_runtime_context",
+                    "next_step": "review_and_execute",
+                },
+                "risk_level": "medium",
+                "recommended_actions": [
+                    {
+                        "action_type": "llm_generated_recommendation",
+                        "params": {
+                            "query": query,
+                            "item_id": target_item_id,
+                            "quantity": recommended_quantity,
+                            "output_template": output_template,
+                        },
+                    }
+                ],
+                "explanation": "已接入智能型决策链路，但当前使用 fallback 结构返回，建议检查网关或提示模板。" if include_explanation else "",
+                "citations": [
+                    {
+                        "doc_id": str(item.get("doc_id") or ""),
+                        "title": str(item.get("title") or ""),
+                    }
+                    for item in knowledge_hits[:3]
+                ] if include_citations else [],
             },
-            "risk_level": "medium",
-            "recommended_actions": [
-                {
-                    "action_type": "llm_generated_recommendation",
-                    "params": {
-                        "query": query,
-                    },
-                }
-            ],
-            "explanation": "当前为 LLM 模式骨架：已接入知识/历史记忆检索位点，并输出统一结构。",
-            "citations": [
-                {
-                    "doc_id": str(item.get("doc_id") or ""),
-                    "title": str(item.get("title") or "")
-                }
-                for item in knowledge_hits[:3]
-            ],
+        )
+        if not self.llm_client.enabled:
+            return fallback
+
+        messages = self._build_llm_messages(
+            node_name=node.name,
+            query=query,
+            prompt_template=prompt_template,
+            optimization_goal=optimization_goal,
+            constraints=constraints,
+            output_template=output_template,
+            include_explanation=include_explanation,
+            include_citations=include_citations,
+            payload=payload,
+            knowledge_hits=knowledge_hits,
+            history_hits=history_hits,
+        )
+        try:
+            llm_payload = await self.llm_client.chat_json(messages=messages)
+        except (httpx.HTTPError, RuntimeError):
+            return fallback
+
+        return self._normalize_llm_output(node_name=node.name, raw=llm_payload, fallback=fallback, input_payload=payload)
+
+    @staticmethod
+    def _build_llm_messages(
+        *,
+        node_name: str,
+        query: str,
+        prompt_template: str,
+        optimization_goal: str,
+        constraints: list[str],
+        output_template: str,
+        include_explanation: bool,
+        include_citations: bool,
+        payload: dict[str, JsonValue],
+        knowledge_hits: list[dict[str, JsonValue]],
+        history_hits: list[dict[str, JsonValue]],
+    ) -> list[dict[str, str]]:
+        knowledge_text = "\n".join(
+            f"- {item.get('title') or item.get('doc_id')}: {item.get('content') or ''}"
+            for item in knowledge_hits[:5]
+        ) or "无"
+        history_text = "\n".join(
+            f"- {item.get('summary') or ''}"
+            for item in history_hits[-5:]
+        ) or "无"
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "你是大衍系统中的决策型智能体。"
+                    "请基于输入、知识摘要和历史摘要输出严格 JSON 对象，不要输出 Markdown。"
+                    "JSON 必须包含 decision_summary、decision_payload、risk_level、recommended_actions、explanation、citations。"
+                    "risk_level 只能是 low、medium、high。"
+                ),
+            },
+            {
+                "role": "system",
+                "content": (
+                    f"节点名称：{node_name}。提示模板：{prompt_template or '无'}。"
+                    f"优化目标：{optimization_goal}。输出模板：{output_template}。"
+                    f"是否需要 explanation：{'是' if include_explanation else '否'}；是否需要 citations：{'是' if include_citations else '否'}。"
+                ),
+            },
+            {
+                "role": "system",
+                "content": f"知识摘要：\n{knowledge_text}\n历史摘要：\n{history_text}\n业务约束：{constraints or ['无显式约束']}",
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"问题/事件：{query}\n"
+                    f"当前输入：{payload}\n"
+                    "请给出结构化决策，并确保 recommended_actions 为数组，每项至少包含 action_type 与 params。"
+                    "decision_payload 中请尽量给出 severity、target_item_id、recommended_quantity、next_step、decision_basis。"
+                ),
+            },
+        ]
+
+    @staticmethod
+    def _normalize_llm_output(
+        *,
+        node_name: str,
+        raw: dict[str, object],
+        fallback: dict[str, JsonValue],
+        input_payload: dict[str, JsonValue],
+    ) -> dict[str, JsonValue]:
+        decision_payload = raw.get("decision_payload")
+        recommended_actions = raw.get("recommended_actions")
+        citations = raw.get("citations")
+        normalized_payload = DecisionNodeHandler._normalize_decision_payload(
+            cast(dict[str, JsonValue], decision_payload) if isinstance(decision_payload, dict) else cast(dict[str, JsonValue], fallback["decision_payload"]),
+            input_payload=input_payload,
+            fallback_payload=cast(dict[str, JsonValue], fallback["decision_payload"]),
+        )
+        normalized: dict[str, JsonValue] = {
+            "decision_mode": "llm",
+            "decision_summary": str(raw.get("decision_summary") or fallback["decision_summary"]),
+            "decision_payload": normalized_payload,
+            "risk_level": DecisionNodeHandler._normalize_risk_level(raw.get("risk_level"), cast(str, fallback["risk_level"])),
+            "recommended_actions": DecisionNodeHandler._normalize_recommended_actions(
+                cast(list[JsonValue], recommended_actions) if isinstance(recommended_actions, list) and recommended_actions else cast(list[JsonValue], fallback["recommended_actions"]),
+                normalized_payload=normalized_payload,
+            ),
+            "explanation": str(raw.get("explanation") or f"{node_name} 已基于模型返回生成结构化决策。"),
+            "citations": cast(list[JsonValue], citations) if isinstance(citations, list) else cast(list[JsonValue], fallback["citations"]),
         }
+        return normalized
+
+    @staticmethod
+    def _normalize_risk_level(raw_value: object, fallback: str) -> str:
+        if isinstance(raw_value, str) and raw_value in {"low", "medium", "high"}:
+            return raw_value
+        return fallback
+
+    @staticmethod
+    def _number_value(raw_value: object) -> float | None:
+        if isinstance(raw_value, (int, float)):
+            return float(raw_value)
+        if isinstance(raw_value, str):
+            try:
+                return float(raw_value.strip())
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _string_value(raw_value: object, *, default: str = "") -> str:
+        return raw_value.strip() if isinstance(raw_value, str) and raw_value.strip() else default
+
+    @staticmethod
+    def _object_dict(raw_value: object) -> dict[str, object]:
+        return cast(dict[str, object], raw_value) if isinstance(raw_value, dict) else {}
+
+    @staticmethod
+    def _string_list(raw_value: object, default: list[str]) -> list[str]:
+        if isinstance(raw_value, list):
+            typed_items = cast(list[object], raw_value)
+            values = [item.strip() for item in typed_items if isinstance(item, str) and item.strip()]
+            return values or default
+        return default
+
+    @staticmethod
+    def _float_dict(raw_value: object, default: dict[str, float]) -> dict[str, float]:
+        if not isinstance(raw_value, dict):
+            return default
+        parsed: dict[str, float] = {}
+        typed_items = cast(dict[object, object], raw_value)
+        for key, value in typed_items.items():
+            if not isinstance(key, str) or not key.strip():
+                continue
+            number = DecisionNodeHandler._number_value(value)
+            if number is None:
+                continue
+            parsed[key.strip()] = number
+        return parsed or default
+
+    @staticmethod
+    def _resolve_severity(stock_ratio: float | None, thresholds: dict[str, float]) -> str:
+        if stock_ratio is None:
+            return "medium"
+        high_limit = thresholds.get("high", 0.3)
+        medium_limit = thresholds.get("medium", 0.8)
+        if stock_ratio <= high_limit:
+            return "high"
+        if stock_ratio <= medium_limit:
+            return "medium"
+        return "low"
+
+    @staticmethod
+    def _model_factor(model_type: str, optimization_goal: str) -> float:
+        if model_type == "capacity_planner":
+            return 2.2
+        if model_type == "risk_balancer":
+            return 1.4 if "risk" in optimization_goal else 1.7
+        return 1.8 if "timeliness" in optimization_goal else 1.5
+
+    @staticmethod
+    def _clamp_quantity(value: int, *, minimum: int, maximum: int) -> int:
+        return max(minimum, min(maximum, value))
+
+    @staticmethod
+    def _score_candidate_actions(
+        *,
+        candidate_actions: list[str],
+        objective_weights: dict[str, float],
+        optimization_goal: str,
+        demand_pressure: float,
+    ) -> tuple[str, dict[str, JsonValue]]:
+        scored: dict[str, JsonValue] = {}
+        best_action = candidate_actions[0]
+        best_score = float("-inf")
+        for action in candidate_actions:
+            cost_score = 0.9 if "notify" in action else 0.55 if "approval" in action else 0.35
+            timeliness_score = 0.95 if "append" in action or "upsert" in action else 0.7 if "approval" in action else 0.45
+            stability_score = 0.88 if "approval" in action else 0.62 if "append" in action else 0.52
+            score = (
+                objective_weights.get("cost", 0.0) * cost_score
+                + objective_weights.get("timeliness", 0.0) * timeliness_score * (1 + min(demand_pressure, 1.0) * 0.2)
+                + objective_weights.get("stability", 0.0) * stability_score
+            )
+            if "risk" in optimization_goal and "approval" in action:
+                score += 0.08
+            if "efficiency" in optimization_goal and ("append" in action or "upsert" in action):
+                score += 0.06
+            scored[action] = round(score, 4)
+            if score > best_score:
+                best_score = score
+                best_action = action
+        return best_action, scored
+
+    @staticmethod
+    def _normalize_decision_payload(
+        payload: dict[str, JsonValue],
+        *,
+        input_payload: dict[str, JsonValue],
+        fallback_payload: dict[str, JsonValue],
+    ) -> dict[str, JsonValue]:
+        target_item_id = DecisionNodeHandler._coalesce_meaningful_value(
+            payload.get("target_item_id"),
+            input_payload.get("item_id"),
+            input_payload.get("target_item_id"),
+            fallback_payload.get("target_item_id"),
+            default="unknown-item",
+        )
+        current_stock = DecisionNodeHandler._coalesce_meaningful_value(
+            payload.get("current_stock"),
+            input_payload.get("stock_count"),
+            fallback_payload.get("current_stock"),
+        )
+        safety_limit = DecisionNodeHandler._coalesce_meaningful_value(
+            payload.get("safety_limit"),
+            input_payload.get("safety_limit"),
+            fallback_payload.get("safety_limit"),
+        )
+        recommended_quantity = payload.get("recommended_quantity") or fallback_payload.get("recommended_quantity") or 20
+        next_step = DecisionNodeHandler._coalesce_meaningful_value(payload.get("next_step"), default="review_and_execute")
+        decision_basis = DecisionNodeHandler._coalesce_meaningful_value(
+            payload.get("decision_basis"),
+            fallback_payload.get("decision_basis"),
+            default="llm_structured_reasoning",
+        )
+        severity = DecisionNodeHandler._coalesce_meaningful_value(payload.get("severity"), fallback_payload.get("severity"), default="medium")
+        normalized = dict(payload)
+        normalized.update(
+            {
+                "target_item_id": target_item_id,
+                "current_stock": current_stock,
+                "safety_limit": safety_limit,
+                "recommended_quantity": recommended_quantity,
+                "next_step": next_step,
+                "decision_basis": decision_basis,
+                "severity": severity,
+            }
+        )
+        return normalized
+
+    @staticmethod
+    def _coalesce_meaningful_value(*values: JsonValue, default: JsonValue | None = None) -> JsonValue:
+        for value in values:
+            if value is None:
+                continue
+            if isinstance(value, str) and value.strip().lower() in {"", "null", "none", "unknown", "unknown-item"}:
+                continue
+            return value
+        return default
+
+    @staticmethod
+    def _normalize_recommended_actions(
+        actions: list[JsonValue],
+        *,
+        normalized_payload: dict[str, JsonValue],
+    ) -> list[JsonValue]:
+        if actions:
+            normalized_actions: list[JsonValue] = []
+            for item in actions:
+                if not isinstance(item, dict):
+                    continue
+                typed_item = dict(item)
+                action_type = typed_item.get("action_type")
+                if not isinstance(action_type, str) or not action_type.strip():
+                    typed_item["action_type"] = "llm_generated_recommendation"
+                params = typed_item.get("params")
+                typed_params = dict(params) if isinstance(params, dict) else {}
+                _ = typed_params.setdefault("item_id", normalized_payload.get("target_item_id"))
+                _ = typed_params.setdefault("quantity", normalized_payload.get("recommended_quantity"))
+                typed_item["params"] = cast(JsonValue, typed_params)
+                normalized_actions.append(cast(JsonValue, typed_item))
+            if normalized_actions:
+                return normalized_actions
+
+        return [
+            {
+                "action_type": "llm_generated_recommendation",
+                "params": {
+                    "item_id": normalized_payload.get("target_item_id"),
+                    "quantity": normalized_payload.get("recommended_quantity"),
+                },
+            }
+        ]

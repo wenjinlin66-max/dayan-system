@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import cast
 from uuid import uuid4
@@ -9,6 +10,7 @@ from app.domain.approvals.repository import ApprovalRepository
 from app.domain.chat.repository import ChatRepository
 from app.domain.executions.repository import ExecutionRepository
 from app.domain.workflows.repository import WorkflowRepository
+from app.integrations.llm.client import LLMClient
 from app.integrations.tools.registry import ToolRegistry
 from app.runtime.dispatcher import NodeDispatcher, RuntimeHandler
 from app.runtime.handlers.approval import ApprovalNodeHandler
@@ -19,7 +21,9 @@ from app.runtime.handlers.dialog import DialogNodeHandler
 from app.runtime.handlers.execution import ExecutionNodeHandler
 from app.runtime.handlers.sensor import SensorNodeHandler
 from app.runtime.models import JsonValue, RuntimeState
-from app.schemas.execution import ExecutionStartRequest, ExecutionStatusResponse
+from app.schemas.execution import ExecutionStartRequest, ExecutionStatusResponse, WorkflowExecutionHistoryItem, WorkflowExecutionHistoryResponse
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionService:
@@ -169,6 +173,27 @@ class ExecutionService:
             raise ValueError("EXECUTION_NOT_FOUND")
         return self._to_response(run)
 
+    async def delete_for_dept(self, execution_id: str, *, dept_id: str) -> None:
+        run = await self.execution_repository.get_run(execution_id)
+        if run is None or run.dept_id != dept_id:
+            raise ValueError("EXECUTION_NOT_FOUND")
+        deleted = await self.execution_repository.delete_run(execution_id)
+        if not deleted:
+            raise ValueError("EXECUTION_NOT_FOUND")
+        await self.execution_repository.session.commit()
+
+    async def list_workflow_history(self, workflow_id: str, *, dept_id: str | None = None, include_all: bool = False) -> WorkflowExecutionHistoryResponse:
+        workflow = await self.workflow_repository.get_workflow(workflow_id)
+        if workflow is None:
+            raise ValueError("WORKFLOW_NOT_FOUND")
+        effective_dept_id = None if include_all else dept_id
+        runs = await self.execution_repository.list_runs_by_workflow(workflow_id, dept_id=effective_dept_id)
+        return WorkflowExecutionHistoryResponse(
+            workflow_id=workflow.id,
+            workflow_name=workflow.name,
+            items=[self._to_history_item(run, workflow.name) for run in runs],
+        )
+
     async def resume_from_approval(
         self,
         execution_id: str,
@@ -206,6 +231,12 @@ class ExecutionService:
         workflow_version = await self._get_workflow_version(run.workflow_id, run.workflow_version, run.mode)
         context_input = self._extract_nested_dict(run.context_snapshot, "input")
         final_context = self._extract_nested_dict(run.final_output, "context")
+        dialog_outputs = self._extract_nested_json_dict(run.final_output, "dialog_outputs")
+        sensor_outputs = self._extract_nested_json_dict(run.final_output, "sensor_outputs")
+        decision_outputs = self._extract_nested_json_dict(run.final_output, "decision_outputs")
+        tool_outputs = self._extract_nested_json_dict(run.final_output, "tool_outputs")
+        history = self._extract_nested_json_list(run.final_output, "history")
+        errors = self._extract_nested_json_list(run.final_output, "errors")
         runtime_state = RuntimeState(
             execution_id=run.id,
             workflow_id=run.workflow_id,
@@ -214,6 +245,12 @@ class ExecutionService:
             current_node=next_node,
             input_payload=self._coerce_json_dict(context_input),
             context=self._coerce_json_dict(final_context),
+            dialog_outputs=dialog_outputs,
+            sensor_outputs=sensor_outputs,
+            decision_outputs=decision_outputs,
+            tool_outputs=tool_outputs,
+            history=history,
+            errors=errors,
         )
         runtime_state.context["approval_decision"] = decision
         runtime_state.context["approval_comment"] = comment
@@ -278,6 +315,7 @@ class ExecutionService:
                 thread_id=state.execution_id,
                 checkpoint_data={
                     "current_node": node.id,
+                    "dialog_outputs": state.dialog_outputs,
                     "history": state.history,
                     "sensor_outputs": state.sensor_outputs,
                     "tool_outputs": state.tool_outputs,
@@ -293,13 +331,14 @@ class ExecutionService:
 
     @staticmethod
     def _build_dispatcher(tool_registry: ToolRegistry, approval_repository: ApprovalRepository) -> NodeDispatcher:
+        llm_client = LLMClient.from_settings()
         handlers: dict[str, RuntimeHandler] = {
-                "dialog_agent": DialogNodeHandler(),
+                "dialog_agent": DialogNodeHandler(llm_client),
                 "sensor_agent": SensorNodeHandler(),
-                "decision_agent": DecisionNodeHandler(),
+                "decision_agent": DecisionNodeHandler(llm_client),
                 "condition": ConditionNodeHandler(),
                 "approval": ApprovalNodeHandler(approval_repository),
-                "execution_agent": ExecutionNodeHandler(tool_registry.get_department_table_writer()),
+                "execution_agent": ExecutionNodeHandler(tool_registry.get_department_table_writer(), llm_client),
             }
         return NodeDispatcher(handlers)
 
@@ -316,6 +355,7 @@ class ExecutionService:
         return {
             "history": cast(list[JsonValue], state.history),
             "context": state.context,
+            "dialog_outputs": cast(dict[str, JsonValue], state.dialog_outputs),
             "sensor_outputs": cast(dict[str, JsonValue], state.sensor_outputs),
             "decision_outputs": cast(dict[str, JsonValue], state.decision_outputs),
             "tool_outputs": cast(dict[str, JsonValue], state.tool_outputs),
@@ -333,6 +373,28 @@ class ExecutionService:
         value = payload.get(key)
         return cast(dict[str, object], value) if isinstance(value, dict) else {}
 
+    @staticmethod
+    def _extract_nested_json_dict(payload: dict[str, object] | None, key: str) -> dict[str, dict[str, object]]:
+        if not isinstance(payload, dict):
+            return {}
+        value = payload.get(key)
+        if not isinstance(value, dict):
+            return {}
+        return {
+            str(raw_key): cast(dict[str, object], raw_value)
+            for raw_key, raw_value in value.items()
+            if isinstance(raw_key, str) and isinstance(raw_value, dict)
+        }
+
+    @staticmethod
+    def _extract_nested_json_list(payload: dict[str, object] | None, key: str) -> list[dict[str, JsonValue]]:
+        if not isinstance(payload, dict):
+            return []
+        value = payload.get(key)
+        if not isinstance(value, list):
+            return []
+        return [cast(dict[str, JsonValue], item) for item in value if isinstance(item, dict)]
+
     async def _resolve_workflow_version(self, payload: ExecutionStartRequest, *, dept_id: str):
         workflow = await self.workflow_repository.get_workflow(payload.workflow_id)
         if workflow is None or workflow.owner_dept_id != dept_id:
@@ -343,13 +405,35 @@ class ExecutionService:
                 raise ValueError("WORKFLOW_VERSION_NOT_FOUND")
             if version.compile_status != "success" or version.execution_dag is None:
                 raise ValueError("WORKFLOW_NOT_COMPILED")
+            if self._has_empty_canvas(version.ui_schema):
+                logger.warning(
+                    "rejecting workflow version with empty ui_schema: workflow_id=%s version=%s mode=%s",
+                    payload.workflow_id,
+                    version.version,
+                    version.mode,
+                )
+                raise ValueError("WORKFLOW_RELEASE_CORRUPTED")
             return version
         current = await self.workflow_repository.get_current_release(payload.workflow_id)
         if current is None:
             raise ValueError("RELEASE_NOT_FOUND")
         if current.compile_status != "success" or current.execution_dag is None:
             raise ValueError("WORKFLOW_NOT_COMPILED")
+        if self._has_empty_canvas(current.ui_schema):
+            logger.warning(
+                "rejecting current release with empty ui_schema: workflow_id=%s version=%s",
+                payload.workflow_id,
+                current.version,
+            )
+            raise ValueError("WORKFLOW_RELEASE_CORRUPTED")
         return current
+
+    @staticmethod
+    def _has_empty_canvas(ui_schema: dict[str, object] | None) -> bool:
+        if not isinstance(ui_schema, dict):
+            return True
+        raw_nodes = ui_schema.get("nodes")
+        return not isinstance(raw_nodes, list) or len(raw_nodes) == 0
 
     @staticmethod
     def _extract_session_id(run: ExecutionRun) -> str | None:
@@ -393,6 +477,83 @@ class ExecutionService:
                 "error_summary": error_summary,
             },
             related_execution_id=execution_id,
+        )
+
+    @staticmethod
+    def _to_history_item(run: ExecutionRun, workflow_name: str) -> WorkflowExecutionHistoryItem:
+        final_output = run.final_output if isinstance(run.final_output, dict) else {}
+        tool_outputs = final_output.get("tool_outputs") if isinstance(final_output.get("tool_outputs"), dict) else {}
+        sensor_outputs = final_output.get("sensor_outputs") if isinstance(final_output.get("sensor_outputs"), dict) else {}
+        dialog_outputs = final_output.get("dialog_outputs") if isinstance(final_output.get("dialog_outputs"), dict) else {}
+
+        if tool_outputs:
+            first_tool = next(iter(tool_outputs.values()))
+            execution_type = "表格执行"
+            task_summary = "执行型智能体写入业务目标"
+            target_summary = "未知目标"
+            if isinstance(first_tool, dict):
+                selected_target_ref = first_tool.get("selected_target_ref")
+                request_payload = first_tool.get("request_payload") if isinstance(first_tool.get("request_payload"), dict) else {}
+                operation = request_payload.get("operation") if isinstance(request_payload, dict) else None
+                provider = request_payload.get("provider") if isinstance(request_payload, dict) else None
+                if isinstance(selected_target_ref, str) and selected_target_ref:
+                    target_summary = selected_target_ref
+                elif isinstance(provider, str) and provider:
+                    target_summary = provider
+                if isinstance(operation, str) and operation:
+                    task_summary = f"执行型智能体执行 {operation}"
+            return WorkflowExecutionHistoryItem(
+                execution_id=run.id,
+                workflow_id=run.workflow_id,
+                workflow_name=workflow_name,
+                dept_id=run.dept_id,
+                status=run.status,
+                execution_type=execution_type,
+                task_summary=task_summary,
+                target_summary=target_summary,
+                started_at=run.started_at.isoformat() if run.started_at else None,
+                updated_at=(run.finished_at or run.started_at).isoformat() if (run.finished_at or run.started_at) else None,
+            )
+
+        if sensor_outputs:
+            return WorkflowExecutionHistoryItem(
+                execution_id=run.id,
+                workflow_id=run.workflow_id,
+                workflow_name=workflow_name,
+                dept_id=run.dept_id,
+                status=run.status,
+                execution_type="感知触发",
+                task_summary="感知型智能体处理事件",
+                target_summary=run.trigger_event_id or run.trigger_type,
+                started_at=run.started_at.isoformat() if run.started_at else None,
+                updated_at=(run.finished_at or run.started_at).isoformat() if (run.finished_at or run.started_at) else None,
+            )
+
+        if dialog_outputs:
+            return WorkflowExecutionHistoryItem(
+                execution_id=run.id,
+                workflow_id=run.workflow_id,
+                workflow_name=workflow_name,
+                dept_id=run.dept_id,
+                status=run.status,
+                execution_type="对话执行",
+                task_summary="对话型智能体响应会话",
+                target_summary=run.correlation_id or "部门对话框",
+                started_at=run.started_at.isoformat() if run.started_at else None,
+                updated_at=(run.finished_at or run.started_at).isoformat() if (run.finished_at or run.started_at) else None,
+            )
+
+        return WorkflowExecutionHistoryItem(
+            execution_id=run.id,
+            workflow_id=run.workflow_id,
+            workflow_name=workflow_name,
+            dept_id=run.dept_id,
+            status=run.status,
+            execution_type="通用执行",
+            task_summary=f"{run.trigger_type} 类型流程执行",
+            target_summary=run.current_node or run.entry_node,
+            started_at=run.started_at.isoformat() if run.started_at else None,
+            updated_at=(run.finished_at or run.started_at).isoformat() if (run.finished_at or run.started_at) else None,
         )
 
     @staticmethod

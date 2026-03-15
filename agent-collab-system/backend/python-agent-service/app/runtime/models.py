@@ -30,6 +30,7 @@ class RuntimeState:
     current_node: str | None
     input_payload: dict[str, JsonValue] = field(default_factory=dict)
     context: dict[str, JsonValue] = field(default_factory=dict)
+    dialog_outputs: dict[str, dict[str, object]] = field(default_factory=dict)
     sensor_outputs: dict[str, dict[str, object]] = field(default_factory=dict)
     decision_outputs: dict[str, dict[str, object]] = field(default_factory=dict)
     tool_outputs: dict[str, dict[str, object]] = field(default_factory=dict)

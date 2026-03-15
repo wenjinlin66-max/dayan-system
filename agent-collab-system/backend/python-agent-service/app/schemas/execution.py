@@ -37,6 +37,25 @@ class ExecutionStatusResponse(BaseModel):
     final_output: dict[str, object] | None = None
 
 
+class WorkflowExecutionHistoryItem(BaseModel):
+    execution_id: str
+    workflow_id: str
+    workflow_name: str
+    dept_id: str
+    status: str
+    execution_type: str
+    task_summary: str
+    target_summary: str
+    started_at: str | None = None
+    updated_at: str | None = None
+
+
+class WorkflowExecutionHistoryResponse(BaseModel):
+    workflow_id: str
+    workflow_name: str
+    items: list[WorkflowExecutionHistoryItem]
+
+
 class MockEventInjectRequest(BaseModel):
     workflow_id: str
     version: int | None = None

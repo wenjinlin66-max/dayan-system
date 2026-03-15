@@ -58,6 +58,19 @@ async def list_sessions(
     ]
 
 
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    session_id: str,
+    context: RequestContext = Depends(get_request_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> None:
+    service = build_service(session)
+    try:
+        await service.delete_session(session_id, dept_id=context.dept_id, user_id=context.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
 @router.post("/sessions/{session_id}/messages", response_model=ChatMessageResponse)
 async def send_message(
     session_id: str,

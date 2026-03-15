@@ -65,6 +65,12 @@ class ChatService:
             last_message_at=session.last_message_at.isoformat() if session.last_message_at else None,
         )
 
+    async def delete_session(self, session_id: str, *, dept_id: str, user_id: str) -> None:
+        deleted = await self.repository.delete_session_for_actor(session_id, dept_id=dept_id, user_id=user_id)
+        if not deleted:
+            raise ValueError("CHAT_SESSION_NOT_FOUND")
+        await self.repository.session.commit()
+
     async def list_catalog(self, *, dept_id: str, category: str | None = None) -> WorkflowCatalogResponse:
         entries = await self.repository.list_catalog(dept_id, category)
         return WorkflowCatalogResponse(items=[self._catalog_item(entry, None) for entry in entries])

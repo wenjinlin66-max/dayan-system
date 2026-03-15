@@ -3,18 +3,19 @@ import json
 from time import monotonic
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_db_session, get_request_context
+from app.core.deps import get_db_session, get_mock_db_session, get_request_context
 from app.core.security import RequestContext
 from app.db.session import get_session_factory
 from app.domain.approvals.repository import ApprovalRepository
 from app.domain.executions.repository import ExecutionRepository
 from app.domain.executions.service import ExecutionService
 from app.domain.workflows.repository import WorkflowRepository
-from app.schemas.execution import ExecutionStartRequest, ExecutionStatusResponse, MockEventInjectRequest, ExecutionTrigger, ExecutionOperator
+from app.mock_records.repository.records_repository import MockRecordsRepository
+from app.schemas.execution import ExecutionStartRequest, ExecutionStatusResponse, MockEventInjectRequest, ExecutionTrigger, ExecutionOperator, WorkflowExecutionHistoryResponse
 
 router = APIRouter()
 
@@ -86,6 +87,38 @@ async def get_execution(
         return await service.get_status_for_dept(execution_id, dept_id=context.dept_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get("/workflow/{workflow_id}/history", response_model=WorkflowExecutionHistoryResponse)
+async def get_workflow_execution_history(
+    workflow_id: str,
+    include_all: bool = False,
+    context: RequestContext = Depends(get_request_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> WorkflowExecutionHistoryResponse:
+    service = build_service(session)
+    try:
+        return await service.list_workflow_history(workflow_id, dept_id=context.dept_id, include_all=include_all)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.delete("/{execution_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_execution(
+    execution_id: str,
+    context: RequestContext = Depends(get_request_context),
+    session: AsyncSession = Depends(get_db_session),
+    mock_session: AsyncSession = Depends(get_mock_db_session),
+) -> Response:
+    service = build_service(session)
+    try:
+        await service.delete_for_dept(execution_id, dept_id=context.dept_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    mock_repository = MockRecordsRepository(mock_session)
+    await mock_repository.remove_execution_references(execution_id)
+    await mock_session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{execution_id}/stream")

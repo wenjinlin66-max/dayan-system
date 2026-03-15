@@ -4,7 +4,7 @@ from datetime import datetime
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.chat import ChatMessage, ChatSession
@@ -40,7 +40,7 @@ class ChatRepository:
         result = await self.session.execute(
             select(ChatSession)
             .where(ChatSession.dept_id == dept_id, ChatSession.user_id == user_id)
-            .order_by(ChatSession.created_at.desc())
+            .order_by(ChatSession.last_message_at.desc().nullslast(), ChatSession.created_at.desc())
         )
         return list(result.scalars().all())
 
@@ -54,6 +54,14 @@ class ChatRepository:
             select(ChatMessage).where(ChatMessage.session_id == session_id).order_by(ChatMessage.created_at.asc())
         )
         return list(result.scalars().all())
+
+    async def delete_session_for_actor(self, session_id: str, *, dept_id: str, user_id: str) -> bool:
+        session = await self.get_session_for_actor(session_id, dept_id, user_id)
+        if session is None:
+            return False
+        _ = await self.session.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
+        _ = await self.session.execute(delete(ChatSession).where(ChatSession.id == session_id))
+        return True
 
     async def touch_session(self, session_id: str, *, last_message_at: datetime) -> None:
         _ = await self.session.execute(

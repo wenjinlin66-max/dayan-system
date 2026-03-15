@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timezone
 from datetime import date, datetime
+import logging
 from typing import cast
 from uuid import uuid4
 
@@ -27,6 +28,8 @@ from app.mock_records.schemas.records import (
     MockRecordsTableSchemaResponse,
 )
 from app.schemas.execution import ExecutionOperator, ExecutionStartRequest, ExecutionTrigger
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -242,8 +245,19 @@ class MockRecordsService:
         for workflow in workflows:
             release = await self.workflow_repository.get_current_release(workflow.id)
             if release is None or release.compile_status != "success" or not release.execution_dag:
+                logger.info("skip workflow auto-trigger: workflow_id=%s reason=no_released_compiled_dag", workflow.id)
+                continue
+            if not self._has_canvas_nodes(release.ui_schema):
+                logger.warning("skip workflow auto-trigger: workflow_id=%s reason=empty_canvas_nodes", workflow.id)
                 continue
             if not self._release_matches_event(release.execution_dag, table_name=table_name, event_type=event_type, operation=operation):
+                logger.info(
+                    "skip workflow auto-trigger: workflow_id=%s reason=event_not_matched table=%s event_type=%s operation=%s",
+                    workflow.id,
+                    table_name,
+                    event_type,
+                    operation,
+                )
                 continue
             response = await self.execution_service.start(
                 ExecutionStartRequest(
@@ -301,6 +315,13 @@ class MockRecordsService:
                 continue
             return True
         return False
+
+    @staticmethod
+    def _has_canvas_nodes(ui_schema: dict[str, object] | None) -> bool:
+        if not isinstance(ui_schema, dict):
+            return False
+        raw_nodes = ui_schema.get("nodes")
+        return isinstance(raw_nodes, list) and len(raw_nodes) > 0
 
     def _get_table_config(self, table_name: str) -> TableConfig:
         config = TABLE_CONFIGS.get(table_name)

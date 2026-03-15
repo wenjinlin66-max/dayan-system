@@ -32,12 +32,13 @@ class WorkflowService:
         self.compiler = compiler or WorkflowCompiler()
 
     async def create_workflow(self, payload: WorkflowCreateRequest, *, dept_id: str, user_id: str) -> WorkflowResponse:
+        owner_dept_id = payload.owner_dept_id or dept_id
         workflow_id = f"wf_{uuid4().hex[:12]}"
         workflow = Workflow(
             id=workflow_id,
             code=payload.code,
             name=payload.name,
-            owner_dept_id=dept_id,
+            owner_dept_id=owner_dept_id,
             visibility=payload.visibility,
             latest_draft_version=1,
             current_release_version=None,
@@ -239,8 +240,8 @@ class WorkflowService:
             versions=[self._to_version_response(version) for version in versions],
         )
 
-    async def list_workflows(self, *, dept_id: str) -> list[WorkflowResponse]:
-        workflows = await self.repository.list_workflows_by_dept(dept_id)
+    async def list_workflows(self, *, dept_id: str, include_all: bool = False) -> list[WorkflowResponse]:
+        workflows = await self.repository.list_workflows() if include_all else await self.repository.list_workflows_by_dept(dept_id)
         responses: list[WorkflowResponse] = []
         for workflow in workflows:
             registry = await self.repository.get_current_registry_entry(workflow.id)

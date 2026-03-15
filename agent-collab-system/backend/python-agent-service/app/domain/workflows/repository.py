@@ -25,7 +25,7 @@ class WorkflowRepository:
         return result.scalar_one_or_none()
 
     async def list_workflows(self) -> list[Workflow]:
-        result = await self.session.execute(select(Workflow).order_by(Workflow.updated_at.desc()))
+        result = await self.session.execute(select(Workflow).where(Workflow.status == "active").order_by(Workflow.updated_at.desc()))
         return list(result.scalars().all())
 
     async def list_workflows_by_dept(self, dept_id: str) -> list[Workflow]:
