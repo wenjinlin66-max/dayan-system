@@ -104,11 +104,13 @@
 | 接口 | 方法 | 说明 | 鉴权 | 幂等 |
 |---|---|---|---|---|
 | /api/v1/workflows | POST | 创建工作流草稿 | Python侧鉴权 | 否 |
+| /api/v1/workflows | GET | 查询 workflow 列表，支持按部门或全量演示视图返回 | Python侧鉴权 | 是 |
 | /api/v1/workflows/:workflow_id/draft | PUT | 更新工作流草稿 | Python侧鉴权 | 是 |
 
 补充读取约束：
 - `GET /api/v1/workflows` 返回中必须包含 `workflow_category`
 - `GET /api/v1/workflows` 返回中应补充 `workflow_trigger_type`，用于明确当前 workflow 的触发逻辑分类
+- `GET /api/v1/workflows` 当前支持 `dept_id` 和 `include_all` 查询参数：前者用于制作区按显式部门加载 workflow，后者用于查看区的“部门 → 触发逻辑”演示视图
 - `GET /api/v1/workflows`、`GET /draft`、`GET /releases/current`、`GET /versions`、`PUT /draft`、`POST /publish` 必须按 `dept_id` 做后端硬限制
 - 工作流查看区前端不再用“部门下拉筛选”承担越权防护职责
 
@@ -140,7 +142,9 @@
 |---|---|---|---|---|
 | /api/v1/executions/start | POST | 按 workflow_id + version/mode 启动执行 | Python侧鉴权 | 是 |
 | /api/v1/executions/inject/mock-event | POST | 以标准事件信封形态注入 mock 数据库事件，驱动感知型工作流 | Python侧鉴权 | 是 |
+| /api/v1/executions/workflow/:workflow_id/history | GET | 查询指定 workflow 的执行历史摘要，供查看区/对话区历史查看器使用 | Python侧鉴权 | 是 |
 | /api/v1/executions/:execution_id | GET | 查询执行状态 | Python侧鉴权 | 是 |
+| /api/v1/executions/:execution_id | DELETE | 删除执行记录，并同步清理 checkpoint / 审批镜像 / Mock Records 事件引用 | Python侧鉴权 | 是 |
 | /api/v1/executions/:execution_id/stream | GET | 以 SSE 推送执行状态快照 | Python侧鉴权 | 是 |
 | /api/v1/executions/:execution_id/resume | POST | 恢复审批或等待中的执行 | Python侧鉴权 | 是 |
 | /api/v1/executions/:execution_id/cancel | POST | 取消执行 | Python侧鉴权 | 是 |

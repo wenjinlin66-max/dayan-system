@@ -5,10 +5,10 @@
 > 补充规则：每次大型步骤完成、关键节点开发完成、或关键修改完成后，应主动进行一次 GitHub 同步，并将同步结果回写到本文件。
 
 ## 当前里程碑
-- M2 画布与工作流编排
+- M3 对话视界与审批 + M4 智能体能力接入（交叉收口）
 
 ## 当前阶段目标
-- 细化五类智能体与控制节点设计，优先收敛主链、执行目标边界、对话选流主链与控制节点定义边界
+- 在不新增大功能的前提下完成一轮“代码事实 → skill 文档 → 下一步上下文 → GitHub 同步”收尾；收口 workflow 部门化、执行历史查看器、records 临时页角色定位与当前环境残留问题
 
 ## 已完成模块
 - Python 服务基础骨架
@@ -72,34 +72,40 @@
 - 本轮代码收尾已完成：Mock Records 相关 Python 重点文件的 basedpyright warning 已清理，前端 Vite 构建已增加 vendor 分包并压掉 chunk warning
 - 浏览器级联调验证已完成：可从顶部导航进入业务表格区，新增记录成功后可看到新记录文本与 `record.created` 事件文本，页面无前端报错
 - 已补文档-代码对齐收尾：将 mock records/records workbench 的“目标拆分结构”与“当前已实现结构”区分开，避免 reference 超前描述实现状态
+- M4 模型主链已继续向真实 AI 收口：统一 `LLMClient` 当前不再只服务 chat ask，而是已接入 `dialog_agent` 节点回复、`decision_agent.llm` 结构化决策，以及 `execution_agent.ai_select` 候选目标选择
+- 当前 runtime 终态已额外回填 `dialog_outputs`，便于对话型节点在 execution 结果中保留节点级回复与选择痕迹
+- 决策型智能体本轮已继续深开发：编译阶段开始校验 decision 节点三模式配置；运行时 `rule/model/llm` 三模式已从骨架推进到“规则阈值决策 / 候选动作评分 / AI 结构化决策”三条细化链路
+- 前端决策型配置面板已继续深化：从简单三输入位升级为规则型、模型型、智能型分区配置；执行结果卡片也开始展示 `decision_outputs`
+- 工作流查看区 → 制作区的恢复问题已定位并修复：workflow 卡片现在会携带 `workflowId` 进入制作区，`WorkflowCanvasPage.vue` 会自动加载对应 workflow 的最新 draft；若 draft 缺失则回退到 current release，已保存/已发布流程不再以空白画布打开
+- 本轮已定位“只有感知输出、没有决策/执行输出”的真实原因：Records 自动触发命中的两个历史 workflow 当前 `ui_schema` 为空且 current release 仅残留单个 `sensor_agent` DAG；同时已验证一条真实三节点 workflow 在 source_system 对齐时可完整跑通 `sensor -> decision -> execution`
+- 当前已补后端护栏：workflow 编译阶段开始阻止 `sensor_agent / decision_agent` 无下游边的假闭环发布；Mock Records 自动触发阶段开始跳过 `ui_schema.nodes` 为空的历史坏版本，避免旧残留发布版继续制造误判
+- 已按用户要求撤回短标签显示试验：workflow / record / execution 重新回到与数据库原值一一对应的展示方式
+- Records 居中执行结果视图已补 workflow 名称展示，并新增执行记录删除能力；删除后会同步清理 execution 主记录、checkpoint、审批任务，以及最近事件中的 execution 引用
+- workflow 部门化第一批能力已开始落地：查看区支持按“部门 → 触发逻辑”两层分组；制作区增加 workflow 归属部门选择；workflow API 补显式部门作用域；执行型节点开始真实消费 `fixed_dept` 路由配置
+- Records 居中弹窗的空“未触发 execution”结果块已移除，未触发事件不再额外占据一整块结果区域
+- Records 原有“执行详情查看器”本轮已整体撤回；业务表格区重新只保留最近事件索引，不再在该页展开 execution 详情
+- 工作流执行历史查看能力已落地到两个入口：工作流查看区可查看单条 workflow 的全量执行历史；对话区的部门 workflow 目录可查看当前部门下该 workflow 的执行历史，二者均按执行类型分类展示“执行任务 / 执行对象 / 执行时间”
+- 本轮收尾同步已完成第一批清理：`progress-tracker` 的过期“下一步”已大幅裁剪；RecordsWorkbench 残留 workflow 拉取已移除；`AttachmentPanel.vue` 已删除；`useExecutionStream` 轮询兜底已补错误保护
 
 ## 进行中模块
 - 感知型智能体详细设计（数据库实时感知优先）
 - 决策型智能体详细设计（三种决策模式）
-- 执行型智能体详细设计（对话审批、结果回传、部门表格执行对象）
+- 执行型智能体详细设计（对话审批、结果回传、部门表格执行对象、跨部门结果投递）
 - 对话型智能体详细设计（部门化路由、workflow 目录、选流与触发主链）
 - 对话型智能体详细设计（部门对话框消息回流、审批与执行结果在消息流中的呈现细化）
 - 监控型智能体详细设计（独立监控工作台、非画布节点）
 - 独立 Mock 业务库与临时业务表格测试工作台详细设计
 - 控制节点详细设计（定义先行，开发后置）
-- M1/M2 代码实现从“骨架”进入“最小闭环可运行”阶段
-- M2 从“最小闭环可运行”进入“交互增强阶段”
-- M2 从“交互增强阶段”进入“编辑器正确性与细节收口阶段”
-- M2 当前进入“参考图 UI 收敛完成，状态正确性待收口”阶段
-- M2 当前进入“状态正确性第一轮已落地，等待继续完善细节体验”阶段
-- M3 代码实现从“页面骨架”进入“最小对话闭环可运行”阶段
-- M3 代码实现从“最小对话闭环可运行”进入“候选确认与状态流增强阶段”
+- workflow 部门化与执行历史查看能力已进入“功能完成，等待权限/分页/竞态等加固”阶段
+- 本地运行环境治理（旧监听、端口冲突、热重载不一致）仍待继续收口
 
 ## 未开始模块
 - 感知型智能体 Go 事件接入实现
-- 决策型节点真实配置表单实现
-- 决策型智能体 rule/model/llm 三模式 handler 实现
-- 执行型节点真实配置表单实现
+- 决策型智能体 rule/model/llm 三模式的进一步收口（补真实规则集来源、模型注册表/持久化参数、智能型 prompt registry 与 tool/RAG 深接）
 - 执行型审批工作区细节增强（筛选、时间线、结果卡片联动）
 - 执行型智能体目标注册表与 handler 实现
 - 部门表格执行对象 adapter / executor 实现
 - 部门表格写入幂等、防重复与失败回传实现
-- 对话型 workflow 目录查询界面实现
 - 对话型智能体 ask/approve/command 路由增强实现（歧义消解、审批主链）
 - execution 状态流完整前端体验（断线重连、终态停流）进一步增强
 - 多模态消息归一化实现
@@ -111,6 +117,7 @@
 
 ## 阻塞项
 - Go 侧事件 envelope 最终字段与投递格式尚未完全联调
+- 本机 8000 端口当前存在异常旧监听残留，导致最新 workflow 部门化 HTTP 行为无法稳定只命中新实例；干净 8001 实例已验证代码正确，但默认开发端口环境仍待清理
 
 ## 风险项
 - 感知型节点前端配置过复杂，可能影响 M2 交付节奏
@@ -125,104 +132,20 @@
 - 监控型智能体若过度干预 execution，将演变成隐藏执行引擎
 - 控制节点若定义不统一，后续 execution_dag 与前端配置可能分裂
 - 前端构建已通过，但当前打包体积较大，后续需做代码分割优化
-- 当前 editor 在状态正确性上仍需继续收口：编辑后应自动标脏并使 compile/publish 状态失效，防止旧编译结果误导发布
+- `include_all`、`dept_id`、`owner_dept_id` 当前仍偏演示期口径，若不补后端权限闸，进入真实多部门联调时会出现跨部门可见性风险
+- `result_target_dept_id` 当前仅落到配置和执行元数据，尚未真正接到 chat 回传部门决策，容易让配置员误以为跨部门结果投递已生效
+- workflow 执行历史当前按 100 条硬限制返回且无分页元信息，后续若历史量增大会影响可用性与解释性
 
 ## 下一步
-- 将执行型智能体 `department_table` 的 DSL、注册表配置、写入契约与前端配置项继续细化到可开发级
-- 测试治理门禁结论：有条件通过；进入实现前需补齐跨部门权限校验、幂等去重、审批恢复后单次写入三类测试与契约检查
-- 补充本地 Mock Event Injector 与 Mock Records Gateway 方案，用于未接 Go 真实数据库前验证感知型、对话型与执行型工作流主链
-- 继续把 `sensor_agent` 从当前内存态匹配推进到正式 `sensor_event_inbox / sensor_subscriptions` 持久化与订阅分发主链
-- 继续把 `sensor-metadata` 从当前后端内置目录推进到真实 Go/数据库元数据同步来源，减少 mock 目录占比
-- 输出 `dayan_mock_records` 的落地实施文档，并继续从“方案设计”推进到“Python Mock Records API + 业务表格测试工作台 + 事件桥”的真实开发，同时保留后续整体删除计划
-- 继续把当前 RecordsWorkbench 从页面骨架推进到更完整的列筛选、字段校验、执行写回展示，并补与 `department_table` 的默认映射示例
-- 如需进一步收尾，可继续把项目范围内其他历史存量 basedpyright warning 做分批治理；当前新增/近期关键文件已完成 warning 清理
-- 将对话型智能体“选 workflow + 触发 execution”的主链继续细化到可开发级
-- 将数据库设计文档改造成“按功能分类 + 按开发步骤索引”的结构，方便后续按 skill 阶段快速定位表
-- 基于 `go-python-contracts-v1.md` 将 records/query/error/auth/event/approval/mock 细化到实现级与测试级
-- 继续补齐 M2 真实画布交互、M3 对话选流主链、以及 M4 感知/执行 handler 接入
-- 优先增强 M3：workflow 候选确认、参数补齐、execution 状态流推送、审批恢复卡片
-- 继续增强 M2：节点拖拽连线、节点分组布局、form-create 配置表单、更多 LangGraph 风格视觉细节
-- 按 Oracle 结论优先修复 M2 编辑器正确性：脏状态管理、编辑后重新编译、workflow 加载/重置前未保存提醒、compile error 就地提示
-- 按最新 Oracle 结论继续修复 M2 编辑器正确性：脏状态管理、connect 事件与 store 同步、workflow 加载/重置保护、compile error 紧贴 publish 提示
-- 在本轮正确性收口基础上，继续补齐：compile 成功快照签名、workflow 切换前更细粒度比较、节点新增后自动打开设置聚焦首字段、原生删除键支持
-- 继续增强 M3：候选 workflow 歧义消解、参数补齐、审批卡片与 resume 主链、execution 状态流断线恢复策略
-- 继续增强 M4：将 ExecutionNodeHandler 真正接入 runtime，并补 execution_target_registry / adapter 层
-- 继续增强 workflow 画布：在全屏编辑模式下补更细的沉浸式状态提示与快捷操作
-- 继续增强 M4 runtime：补真实 department_table adapter、审批挂起/恢复、异步 worker 与 exception 路由
-- 继续增强 department_table adapter：补真实 route registry 来源、Go records API 更完整 update/upsert 语义与权限/幂等校验返回
-- 继续增强智能体主线：把 history memory 从 runtime state 推进到真实持久化、把 knowledge memory 接到 RAG、补 decision model/llm 真实推理 client
-- 继续增强前端智能体配置：把 decision_agent、dialog_agent 也升级为与 sensor/execution 同级别的专属 panel
-- 继续增强节点设置前端：补 section 级校验提示、折叠式 JSON 高级区、以及更多智能体字段的结构化控件
-- 继续增强节点设置前端：补分区级校验提示、字段级 schema 迁移保护，以及更细的旧配置兼容映射
-- 继续增强画布交互：补 hover 删除按钮的可达性细节、节点空画布状态验证，以及边标签/路径编辑交互
-- 继续增强审批链：补真实审批任务创建验证、恢复后 checkpoint 继续链路、审批意见回写与驳回结果卡片展示
-- 继续增强工作流查看区：补更细的分类方式、卡片摘要、版本信息与从查看区进入编辑/对话的联动
-- 继续增强工作流查看区：补更细的分类字典、统计摘要与 category 级权限审计
-- 继续增强对话工作台：补消息流里的审批卡片/执行结果卡片富展示，收口当前文本提醒为结构化卡片
-- 继续增强模型主链：把当前 chat ask 路径的 OpenAI-compatible LLM 接口从“基础可调用”推进到真正的对话记忆/RAG/工具调用统一链路
+- 为 `include_all / dept_id / owner_dept_id` 增加后端权限闸，收口 workflow 查看区与执行历史查询的跨部门可见性
+- 将 `result_target_dept_id` 真正接入对话结果回传链路，完成“执行结果投递到指定部门对话框”的闭环
+- 为 workflow 执行历史接口补分页或至少显式截断元信息，并补前端请求竞态保护
+- 清理本机默认开发端口 8000 的异常旧监听，恢复“代码与 HTTP 行为一致”的单实例环境
+- 继续推进 `sensor_event_inbox / sensor_subscriptions` 持久化订阅链，以及 `sensor-metadata` 向真实 Go/数据库元数据来源收口
+- 补齐 `department_table` 的真实 route registry、权限/幂等校验、审批恢复后单次写入验证与契约测试
+- 继续推进对话型智能体：候选 workflow 歧义消解、参数补齐、审批恢复卡片与消息流结构化结果展示
+- 准备 M5 收口前置项：监控 incident 模型、执行列表/异常统计、以及关键 execution 主链的契约/集成测试
 
 ## 文档同步状态
-- project-overview.md：无需更新
-- architecture.md：已同步对话型智能体的 workflow 选流与触发主链，以及执行型智能体 `department_table` 设计
-- workflow-dsl.md：已同步执行型节点 `department_table` 目标类型、配置字段与示例
-- database-design.md：已同步 `department_table` 配置要求，并补充按功能分类与按开发步骤索引的表结构导航
-- go-python-contracts-v1.md：已新增 Go↔Python 数据、事件、执行、审批恢复、错误码与 Mock 正式总表
-- api-event-contracts.md：已同步部门表格写入请求/响应契约
-- api-event-contracts.md：已补充初期无 Go 真实库时的 Mock 联调契约方案
-- api-event-contracts.md：已同步 chat 显式启动 workflow 接口与 execution 状态 SSE 契约
-- api-event-contracts.md：已同步 workflow 缺参时的参数补齐卡片契约与 input_values 启动示例
-- api-event-contracts.md：已同步 workflow 创建时重复 code 的 409 冲突约束
-- frontend-code-structure.md：已同步执行型节点前端配置新增 `department_table` 配置要求
-- frontend-code-structure.md：已同步 chat 工作台的目录启动、候选确认、execution 状态流交互口径
-- frontend-code-structure.md：已同步 WorkflowParameterCard 与 ExecutionConfigPanel 当前交互口径
-- frontend-code-structure.md：已同步 workflow 画布“删除右侧辅助栏 + 全屏编辑”交互口径
-- third-party-dependencies.md：已同步部门表格 adapter 依赖抽象口径
-- third-party-dependencies.md：已同步 tool registry + department_table adapter 当前实现状态
-- implementation-plan.md：已同步对话型智能体选流/触发主链，以及执行型智能体新增部门表格执行对象任务与验收口径
-- implementation-plan.md：已补充 Mock Event Injector / Mock Records Gateway 的阶段任务与验收口径
-- implementation-plan.md：已同步 workflow 目录直接启动、候选确认启动、execution 状态流兜底交付口径
-- implementation-plan.md：已同步 workflow 缺参参数补齐与 `department_table` 配置面板交付口径
-- python-service-api.md：已同步新增 execution stream、chat 显式启动 workflow 接口与参数补齐请求示例
-- python-service-api.md：已同步 workflow 创建冲突返回 409 的接口口径
-- python-service-api.md：已同步 execution start 的最小 runtime 执行行为
-- python-service-api.md：已同步 department_table adapter 的 registry / records API / mock fallback 行为
-- langgraph-runtime.md：已同步当前 runtime 最小主链、dispatcher 接入节点与 final_output 回填口径
-- python-environment-config.md：已同步 Go records / department_table adapter 新增环境变量
-- memory-model.md：已同步三级记忆 runtime accessor 的当前实现口径
-- frontend-code-structure.md：已同步节点设置弹窗与 sensor/execution 专属 panel 新口径
-- frontend-code-structure.md：已同步 dialog/decision/execution/sensor 四类智能体统一的浅色属性面板口径
-- python-service-api.md：已同步 Mock Event Injector 接口行为
-- progress-tracker.md：已同步 M1/M2 最小闭环代码实现状态与下一步开发方向
-- progress-tracker.md：已同步 M3 最小对话主链代码实现状态与下一步增强方向
-- progress-tracker.md：已同步 M2 编辑器增强（节点面板、workflow 加载、发布门禁、画布内 + 交互）
-- frontend-code-structure.md：已同步 workflow 画布工作台当前交互口径（紧凑信息区、画布内节点面板、节点弹窗、左下角控件）
-- frontend-code-structure.md：已同步实时 store 回写、pending 锁、deep clone 快照分离等编辑器正确性规则
-- implementation-plan.md：已同步 M2 当前工作台交付形态描述
-- frontend-code-structure.md：已同步“首屏画布优先、tabs/折叠式辅助信息区”的布局原则
-- implementation-plan.md：已同步 M2 首屏布局收口后的交付形态
-- change-log.md：已同步本次新增设计变更
-- architecture.md：已同步工作流查看区改为 `workflow_category + 后端权限收口`，以及部门对话框主入口口径
-- frontend-code-structure.md：已同步部门对话框、category 分组目录、审批/结果消息回流口径
-- frontend-code-structure.md：已同步中间主对话区去装饰化，以及多模态能力后续并入输入框、当前不展示独立附件卡片的口径
-- frontend-code-structure.md：已同步左侧辅助区重排与历史记录弹窗选择口径
-- architecture.md：已同步顶部导航顺序调整口径
-- frontend-code-structure.md：已同步工作流制作区顶部信息栏继续压缩的布局原则
-- api-event-contracts.md：已同步 workflow 触发逻辑分类与真实删除接口口径
-- implementation-plan.md：已同步 workflow 删除入口与两层分类扩展方向
-- api-event-contracts.md：已同步 `/v1/workflows` 分类返回、后端部门限制与 chat 消息回流契约
-- python-environment-config.md：已同步 Gemini 中转站默认模型配置与环境变量口径
-- third-party-dependencies.md：已同步大模型 API 默认项从 DeepSeek 切换到 Gemini 中转站的选型口径
-- frontend-code-structure.md：已同步制作区内置 mock event inject 入口与 sensor 映射口径
-- api-event-contracts.md：已同步 `inject/mock-event` 当前请求结构与 `sensor_agent` 来源匹配/命中回写规则
-- implementation-plan.md：已同步感知型工作流在制作区内直接验证的交付口径
-- python-service-api.md：已修正 Mock Event Injector 重复旧路由描述，并补充 `sensor-metadata` 与感知 gating 当前行为
-- workflow-dsl.md：已修正 `sensor_agent` 的 `source_type/source_event_key` 示例口径，并补充元数据目录选择规则
-- langgraph-runtime.md：已同步 `sensor_agent` gating 与 final_output 最新字段口径
-- mock-records-architecture.md：已新增独立 Mock 业务数据库、业务表格工作台、代码隔离与未来 Go 替换方案
-- architecture.md：已同步业务表格工作台与 `dayan_mock_records` 的系统定位
-- frontend-code-structure.md：已同步业务表格工作台的页面与组件目录口径
-- python-code-structure.md：已同步 `app/mock_records/` 目录隔离方案
-- python-environment-config.md：已同步 `MOCK_PG*` 环境变量口径
-- python-service-api.md：已同步 Mock Records API 与当前自动建库/建表/事件触发行为
-- mock-records-architecture.md：已同步第一批真实实现状态
-- progress-tracker.md：已补记录本轮 warning 清理与构建优化状态
+- 本轮已重点复核并再次同步：`progress-tracker.md`（清理大量过期“下一步”、重写当前里程碑/阶段目标/风险/阻塞/下一步）、`frontend-code-structure.md`（补 workflow 执行历史查看器与 records 页定位变化）、`python-service-api.md`（补 workflow 执行历史接口）、`api-event-contracts.md`（补 workflow 历史查询契约）、`change-log.md`（补本轮收尾同步记录）
+- 其余已在前几轮同步过且本轮未发生事实变化的 references，本轮不再重复改写

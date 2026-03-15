@@ -9,7 +9,7 @@
 - 能独立开发后再并入更大的 Vue 主项目
 - 结构清楚，但不过度拆分
 - 顶部导航顺序当前收口为：工作流制作区 → 工作流查看区 → 对话区 → 监控区 → 业务表格区（临时）
-- 工作流分类交互当前收口为：先保存“触发逻辑分类”，后续再在查看区扩展为“部门 → 触发逻辑”两层浏览
+- 工作流分类交互当前已开始落地为“部门 → 触发逻辑”两层浏览，查看区优先按部门，再按触发逻辑分类展示 workflow
 
 ## 2. 模块级推荐目录树
 ```text
@@ -135,6 +135,8 @@ agent-collab-module/
 - workflow 名称与编码输入必须实时同步到 store / 当前编辑态，不得依赖失焦后才回写
 - save / compile / publish / load 等异步动作必须具备 pending 锁，避免响应乱序覆盖当前 workflow 状态
 - workflow 加载时必须将“当前可编辑状态”与“上次加载/上次编译快照”分离，避免共享引用导致快照被污染
+- 工作流查看区中的 `前往制作区` 不应只跳到空白画布；必须携带 `workflowId` 并在 `WorkflowCanvasPage.vue` 中自动加载该 workflow 的最新 draft `ui_schema`，若 draft 缺失则回退加载 current release 的 `ui_schema`，保证已保存/已发布 workflow 进入制作区后都能看到真实节点与连线
+- workflow 制作区当前应提供“所属部门”选择，允许配置员在创建阶段显式决定该 workflow 归属哪个 ERP 部门；加载已有流程列表默认跟随当前所选部门过滤
 
 感知型节点第一阶段必须优先支持：
 - 数据库实时感知配置
@@ -192,10 +194,12 @@ agent-collab-module/
 - 多模态输入的最终目标形态应并入主输入框交互（像通用大模型产品一样由用户直接拖入图片/PDF或切换输入模式），当前阶段不再在页面上单独展示附件入口卡片
 - 左侧辅助区应优先放置“最近历史会话 + 审批待办 + 执行结果”，右侧收口为流程目录，避免把审批信息放到离会话太远的位置
 - `ChatSidebar.vue` 默认只展示少量最近会话，完整历史应通过居中弹窗打开供用户选择，而不是长列表直接占满侧栏
+- 对话区中的部门 workflow 目录当前应为每条 workflow 提供“执行历史”入口，点击后在中间弹窗中查看该 workflow 在当前部门下的执行记录，并按执行类型分类展示
 
 工作流查看区分类/删除口径：
 - 查看区当前筛选项应显示为“触发逻辑分类”，不再使用助手自行定义的业务分类
 - workflow 卡片需提供删除入口
+- workflow 卡片当前应在“前往制作区”附近提供“执行历史”入口，打开后在中间弹窗查看该 workflow 的全部执行记录，并按执行类型分类展示“执行任务 / 执行对象 / 执行时间”
 - 删除后对应 workflow 定义数据应从后端删除，并不再进入制作区 / 查看区 / catalog 暴露面
 - workflow 画布页应以“画布优先”作为首要布局原则：删除右侧冗余辅助区后，让画布成为主视图，并支持全屏编辑
 - workflow 创建失败若为编码冲突，前端应将 `WORKFLOW_CODE_ALREADY_EXISTS` 转换为可读提示，而不是直接暴露底层 500 异常
@@ -212,7 +216,7 @@ agent-collab-module/
 - `ApprovalWorkbench.vue`：审批任务区
 - `ExecutionResultCard.vue`：执行结果展示
 - `WorkflowParameterCard.vue`：workflow 缺参时的参数补齐卡片
-- `AttachmentPanel.vue`：语音 / PDF / 图片上传入口
+- 多模态附件入口当前不再保留独立组件卡片，后续统一并入主输入框交互
 
 ### 4.3 MonitorWorkbenchPage.vue
 负责：
@@ -258,6 +262,7 @@ agent-collab-module/
 - `router/agentCollab.ts` 已注册 `/records-workbench`
 - `RecordsWorkbenchPage.vue` 已实现首版三栏布局：左侧选表、中间真实表格、右侧最近事件流
 - `api/records.ts` 与 `store/records.ts` 已落地，支持表列表、schema、行列表、创建、编辑、删除、最近事件刷新
+- 右侧 `Recent Trigger Stream` 当前只保留为最近事件索引区，不再承担 execution 详情查看职责
 - 当前页面仍是单文件集成实现，`components/records/*` 目录尚未拆出；后续若继续演进再做组件细分
 
 ## 5. 与后端契约的直接映射
@@ -322,6 +327,12 @@ agent-collab-module/
 - `SensorConfigPanel.vue` 当前应把触发条件改为结构化规则列表（字段、操作符、比较方式、固定值/字段对比），而不是多行手写表达式
 - `DialogConfigPanel.vue` 当前应覆盖：入口提示、意图标签、响应风格、记忆强度
 - `DecisionConfigPanel.vue` 当前应覆盖：决策模式、规则/模型/提示模板、约束列表、知识范围
+- `DecisionConfigPanel.vue` 当前已进一步细化为三段式专属配置：
+  - 规则型：`rule_set_ref / severity_thresholds / severity_field / action_type / target_item_field / quantity_field`
+  - 模型型：`model_type / model_ref / optimization_goal / candidate_actions / objective_weights / capacity_limits`
+  - 智能型：`prompt_template / output_template / constraints / rag_refs / include_explanation / include_citations`
+- 三模式切换时应保留非当前模式字段，避免用户在来回切换时丢失已录入配置
+- `ExecutionResultCard.vue` 当前除 `sensor_outputs` 外，也应开始展示 `decision_outputs`，便于浏览器级联调时直接看到决策摘要、风险等级与结构化 payload
 - `ExecutionConfigPanel.vue` 当前应覆盖：执行策略、审批策略、目标注册与路由、写入映射
 - 节点专属 panel 的目标不是“字段越多越好”，而是把配置拆成清晰分区，降低扫描成本与误配风险
 - JSON 高级配置区下沉到左侧次级区块，作为调试/补充位点，而不是与正式配置并列抢主视觉

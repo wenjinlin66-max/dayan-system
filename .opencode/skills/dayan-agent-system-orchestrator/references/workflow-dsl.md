@@ -72,7 +72,7 @@
     },
     "prompt_template": "请根据库存异常进行处理建议",
     "rag_refs": ["kb_inventory_policy"],
-    "output_schema_ref": "decision.result.v1"
+    "output_template": "decision.result.v1"
   },
   "runtime": {
     "timeout_sec": 90,
@@ -186,8 +186,14 @@
 
 三种模式最小要求：
 - `rule`：必须有 `rule_set_ref` 或 `rule_config`
-- `model`：必须有 `model_type`、`model_params`、`optimization_goal`
+- `model`：必须有 `model_type`、`optimization_goal`；`model_params` 当前为推荐项，未配置时使用默认权重/容量边界
 - `llm`：必须有 `prompt_template`，推荐启用 `memory_profile` 与 `rag_refs`
+
+当前实现补充口径：
+- `rule_config` 当前已开始承担规则型详细设计：至少可承载 `severity_thresholds / severity_field / target_item_field / quantity_field / action_type`
+- `model_params` 当前已开始承载模型型详细设计：至少可承载 `objective_weights / capacity_limits / candidate_actions`
+- `output_template / include_explanation / include_citations` 当前已进入前端配置与 LLM 模式运行提示，用于约束智能型输出格式与解释强度
+- 编译阶段当前已开始校验 `decision_agent`：`decision_mode` 合法性、三模式必填字段、`constraints / rag_refs` 数组类型，以及 `include_explanation / include_citations` 的布尔值约束
 
 ## 5.2.1 决策型统一输出结构
 推荐所有决策型节点统一输出：
@@ -450,6 +456,7 @@
 ## 8. 编译规则
 - 去除画布坐标、颜色、缩放等纯 UI 字段
 - 校验节点连通性、entrypoint 唯一性、环路合法性
+- `sensor_agent`、`decision_agent` 当前必须至少连接一个下游节点；若无 outgoing edge，则编译失败，避免发布出“只有感知/决策输出但无后继链路”的假闭环 workflow
 - 对每个节点补齐默认 runtime 配置
 - 输出 `execution_dag` 和 `content_hash`
 

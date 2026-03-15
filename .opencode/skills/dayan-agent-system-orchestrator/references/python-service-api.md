@@ -12,6 +12,7 @@ Python 服务对外提供 5 类能力：
 
 ### 2.1 Workflow API
 - `POST /api/v1/workflows`
+- `GET /api/v1/workflows?dept_id=<dept>&include_all=true|false`
 - `GET /api/v1/workflows/sensor-metadata`
 - `PUT /api/v1/workflows/:workflow_id/draft`
 - `POST /api/v1/workflows/:workflow_id/compile`
@@ -21,7 +22,9 @@ Python 服务对外提供 5 类能力：
 
 ### 2.2 Execution API
 - `POST /api/v1/executions/start`
+- `GET /api/v1/executions/workflow/:workflow_id/history`
 - `GET /api/v1/executions/:execution_id`
+- `DELETE /api/v1/executions/:execution_id`
 - `GET /api/v1/executions/:execution_id/stream`
 - `GET /api/v1/executions/:execution_id/timeline`
 - `POST /api/v1/executions/:execution_id/resume`
@@ -131,23 +134,32 @@ Python 服务对外提供 5 类能力：
 - `POST /api/v1/workflows` 在 `code` 与现有 workflow 重复时，应返回 `409 Conflict`
 - 错误详情当前使用：`WORKFLOW_CODE_ALREADY_EXISTS`
 - 前端默认不应再固定写死容易重复的 demo code，而应生成新的草稿编码或提示用户调整编码
+- `POST /api/v1/workflows` 当前允许显式传入 `owner_dept_id`，用于在制作区选择 workflow 归属部门
+- `GET /api/v1/workflows` 当前支持 `include_all=true` 的演示期全量查看口径，供查看区实现“部门 → 触发逻辑”两层分组；正式账号权限收口后再切回严格按账号/部门控制
 
 ## 8. Execution API 当前行为补充
 - `POST /api/v1/executions/start` 当前阶段会在创建 execution 后立即触发一轮最小 runtime 执行，而不是只生成 `running` 初始记录
 - 若 graph 中包含 `dialog_agent -> decision_agent -> execution_agent` 这类最小链路，execution 结果会同步回填到 `final_output`
 - `GET /api/v1/executions/:execution_id/stream` 因此不再只看到静态 `running`，而会读到已完成后的终态快照
+- `DELETE /api/v1/executions/:execution_id` 当前会按 `dept_id` 做权限校验，并同步清理 `execution_runs`、`execution_checkpoints`、审批任务镜像，以及 Mock Records 最近事件中的 `triggered_execution_ids` 引用
+- `GET /api/v1/executions/workflow/:workflow_id/history` 当前返回 workflow 级执行历史摘要，面向查看区与对话区历史查看器，输出已规整为 `execution_type / task_summary / target_summary / started_at / updated_at`
 
 ### 8.1 department_table adapter 当前行为
 - `execution_agent` 不再直接内嵌 mock writer，而是通过 `ToolRegistry` 解析 `department_table` writer
 - 若已配置 `GO_RECORDS_BASE_URL`，则通过 `GoRecordsClient` 调用 Go 泛型 records API
 - 若未配置 `GO_RECORDS_BASE_URL` 且 `ENABLE_MOCK_RECORDS_GATEWAY=true`，则退回 `MockRecordsGateway`
 - `department_table` adapter 当前会保留：`tenant_id / dept_id / operator / trace_id / idempotency_key / payload / execution_context`
+- 当 `execution_target_mode=ai_select` 且存在多个 `execution_targets` 时，`execution_agent` 当前会通过统一 `LLMClient` 从候选目标中选择 `target_ref`；若网关异常或返回无效目标，则退回第一候选目标，并在 `tool_outputs` 中记录 fallback 原因
 
 ### 8.2 智能体 runtime 当前行为
+- `dialog_agent` 当前会根据节点配置中的 `promptHint / intentTag / responseStyle / memoryProfile` 调用统一 `LLMClient` 生成节点级对话回复，并把结果写入 `dialog_outputs` 与 context memory；`dialog_outputs` 当前至少包含 `message / reply / reply_source / llm_enabled / fallback_reason`
 - `sensor_agent` 会将标准化后的感知结果写入 `sensor_outputs` 与 context memory，并记录 `source_matched / condition_matched / triggered / sensor_event`
 - `decision_agent` 会输出统一结构：`decision_mode / decision_summary / decision_payload / risk_level / recommended_actions / explanation / citations`
+- `decision_agent.rule` 当前会读取 `rule_set_ref / rule_config`，输出可直接被下游执行节点消费的严重度、缺口与推荐动作
+- `decision_agent.model` 当前会读取 `model_type / model_ref / optimization_goal / model_params`，计算候选动作评分、推荐动作与建议数量，不再返回固定数量模板
+- `decision_agent.llm` 当前会通过统一 `LLMClient` 请求 OpenAI-compatible 模型网关，并要求返回结构化 JSON；提示中会显式带入 `optimization_goal / constraints / output_template / include_explanation / include_citations`，若模型不可用，则退回本地 fallback 结构
 - `dialog_agent` / `decision_agent` 当前会把关键摘要写入 history memory
-- `final_output` 当前已开始包含：`history / context / sensor_outputs / decision_outputs / tool_outputs / errors`
+- `final_output` 当前已开始包含：`history / context / dialog_outputs / sensor_outputs / decision_outputs / tool_outputs / errors`
 - `sensor_agent` 若未命中来源或条件，当前 runtime 会在该节点停止向下游传播，不再默认沿第一条边继续执行
 
 ### 8.2.1 感知元数据目录当前行为
