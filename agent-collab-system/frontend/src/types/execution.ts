@@ -21,6 +21,9 @@ export interface WorkflowExecutionHistoryItem {
   execution_type: string
   task_summary: string
   target_summary: string
+  result_status?: string | null
+  result_summary?: string | null
+  result_details: string[]
   started_at?: string | null
   updated_at?: string | null
 }

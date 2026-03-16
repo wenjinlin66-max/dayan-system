@@ -46,6 +46,9 @@ class WorkflowExecutionHistoryItem(BaseModel):
     execution_type: str
     task_summary: str
     target_summary: str
+    result_status: str | None = None
+    result_summary: str | None = None
+    result_details: list[str] = Field(default_factory=list)
     started_at: str | None = None
     updated_at: str | None = None
 
