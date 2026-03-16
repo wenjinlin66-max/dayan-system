@@ -172,8 +172,11 @@ DEPARTMENT_TABLE_ROUTE_MAP_JSON={}
 - Embedding / Rerank：当前规划为本地部署
 - GPU：当前已确认可用
 - 推荐优先使用 OpenAI Chat compatible 接法：`base_url=/v1` + `/chat/completions`
-- 若未来代理明确支持 Responses API，可再增加 `LLM_REQUEST_PATH=/responses` 兼容层
+- 当前代码已同时兼容 `LLM_REQUEST_PATH=/chat/completions` 与 `LLM_REQUEST_PATH=/responses`；若中转站需要 OpenAI Responses 口径，可直接切换该变量，无需再改业务调用层
 - 禁止把真实 API key 写入 `.env.example`、skill 文档、代码常量或提交记录
+- 当前代码已支持在 Python 服务根目录自动读取 `.env.local` 与 `.env`，且仅在进程环境未显式注入时回填；本地调试时优先使用 `.env.local`
+- 若历史环境仍使用 `GEMINI_PROXY_API_KEY / GEMINI_PROXY_BASE_URL` 命名，当前代码也已兼容回退到这组变量，避免 Gemini 中转站已配置但 ChatWorkbench 仍误报 `LLM_NOT_CONFIGURED`
+- 前端本地联调若需绕开默认 `8000` 端口残留监听，可通过 `VITE_API_TARGET=http://127.0.0.1:8001` 等方式切换 Vite 代理目标到干净后端实例
 
 ### 4.5 实时推送
 - 第一阶段默认 SSE

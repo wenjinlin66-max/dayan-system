@@ -36,6 +36,39 @@
 - 决策型/对话型智能体调用模型时，应通过统一 LLM client 层接入
 - 当前运行方式：Gemini 通过 OpenAI-compatible 中转站网关接入
 
+当前已验证的 OpenAI-compatible relay 调用口径：
+- 中转 base URL：`https://api.laozhang.ai/v1`
+- Chat Completions 路径：`/chat/completions`
+- Responses 路径：`/responses`
+- SDK 形态：`OpenAI(api_key=..., base_url="https://api.laozhang.ai/v1")`
+- Dayan 当前默认优先使用 Chat Completions，因此后端环境变量默认应配置：`LLM_REQUEST_PATH=/chat/completions`；若需要切到 OpenAI Responses 口径，直接改为 `LLM_REQUEST_PATH=/responses`
+
+接入示例（文档中不记录真实 key）：
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="<YOUR_TEST_KEY>",
+    base_url="https://api.laozhang.ai/v1",
+)
+
+chat_completion = client.chat.completions.create(
+    model="gpt-4o-mini",
+    stream=False,
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Hello!"},
+    ],
+)
+
+response = client.responses.create(
+    model="gpt-4o-mini",
+    input="Hello!",
+    instructions="You are a helpful assistant.",
+)
+```
+
 ### 1.3 Python 基础框架
 - FastAPI
 - LangGraph
