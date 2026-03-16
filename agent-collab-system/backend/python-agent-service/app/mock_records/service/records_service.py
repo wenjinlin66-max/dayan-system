@@ -307,7 +307,7 @@ class MockRecordsService:
             source_system = str(config.get("source_system") or "")
             source_table = str(config.get("source_table") or "")
             source_event_key = str(config.get("source_event_key") or "")
-            if source_system and source_system != "dayan_mock_records":
+            if source_system and not self._source_system_matches(source_system, "dayan_mock_records"):
                 continue
             if source_table and source_table != table_name:
                 continue
@@ -315,6 +315,18 @@ class MockRecordsService:
                 continue
             return True
         return False
+
+    @staticmethod
+    def _source_system_matches(configured_system: str, actual_system: str) -> bool:
+        configured = configured_system.strip()
+        actual = actual_system.strip()
+        if configured == actual:
+            return True
+        aliases = {
+            "erp_prod": {"erp_prod", "dayan_mock_records"},
+            "dayan_mock_records": {"dayan_mock_records", "erp_prod"},
+        }
+        return actual in aliases.get(configured, set())
 
     @staticmethod
     def _has_canvas_nodes(ui_schema: dict[str, object] | None) -> bool:

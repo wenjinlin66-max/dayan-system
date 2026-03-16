@@ -113,6 +113,56 @@ class SensorMetadataService:
                     ],
                 ),
                 SensorSourceOption(
+                    value="dayan_mock_records",
+                    label="业务表格区临时测试源",
+                    source_type="form_change",
+                    tables=[
+                        SensorTableOption(
+                            value="inventory_stock",
+                            label="库存表 inventory_stock",
+                            event_keys=[
+                                SensorEventKeyOption(value="record.updated", label="记录更新"),
+                                SensorEventKeyOption(value="record.created", label="记录新增"),
+                            ],
+                            fields=[
+                                SensorFieldOption(value="item_id", label="物料编码", field_type="string"),
+                                SensorFieldOption(value="stock_count", label="库存数量", field_type="number"),
+                                SensorFieldOption(value="safety_limit", label="安全库存", field_type="number"),
+                                SensorFieldOption(value="warehouse_id", label="仓库编码", field_type="string", suggested_values=["W-01", "W-02", "W-03"]),
+                                SensorFieldOption(value="status", label="库存状态", field_type="string", suggested_values=["healthy", "warning", "critical", "decision_validation"]),
+                            ],
+                        ),
+                        SensorTableOption(
+                            value="production_order",
+                            label="生产工单 production_order",
+                            event_keys=[
+                                SensorEventKeyOption(value="record.updated", label="记录更新"),
+                                SensorEventKeyOption(value="record.created", label="记录新增"),
+                            ],
+                            fields=[
+                                SensorFieldOption(value="order_id", label="工单编号", field_type="string"),
+                                SensorFieldOption(value="progress", label="进度", field_type="number"),
+                                SensorFieldOption(value="order_status", label="工单状态", field_type="string", suggested_values=["pending", "running", "done", "delayed"]),
+                                SensorFieldOption(value="workshop_id", label="车间编码", field_type="string"),
+                            ],
+                        ),
+                        SensorTableOption(
+                            value="device_status",
+                            label="设备状态 device_status",
+                            event_keys=[
+                                SensorEventKeyOption(value="record.updated", label="记录更新"),
+                                SensorEventKeyOption(value="record.created", label="记录新增"),
+                            ],
+                            fields=[
+                                SensorFieldOption(value="device_id", label="设备编号", field_type="string"),
+                                SensorFieldOption(value="temperature", label="温度", field_type="number"),
+                                SensorFieldOption(value="vibration", label="振动值", field_type="number"),
+                                SensorFieldOption(value="device_state", label="设备状态", field_type="string", suggested_values=["online", "offline", "alarm"]),
+                            ],
+                        ),
+                    ],
+                ),
+                SensorSourceOption(
                     value="mes_iot_gateway",
                     label="MES IoT 网关",
                     source_type="iot",

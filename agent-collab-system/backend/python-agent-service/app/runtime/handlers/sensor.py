@@ -106,13 +106,25 @@ class SensorNodeHandler:
         event_type = str(event_envelope.get("event_type") or "").strip()
         event_key = str(payload.get("event_key") or payload.get("operation") or "").strip()
 
-        if configured_system and configured_system != source_system:
+        if configured_system and not SensorNodeHandler._source_system_matches(configured_system, source_system):
             return False
         if configured_table and configured_table != source_table:
             return False
         if configured_event_key and configured_event_key not in {event_type, event_key}:
             return False
         return True
+
+    @staticmethod
+    def _source_system_matches(configured_system: str, source_system: str) -> bool:
+        configured = configured_system.strip()
+        actual = source_system.strip()
+        if configured == actual:
+            return True
+        aliases = {
+            "erp_prod": {"erp_prod", "dayan_mock_records"},
+            "dayan_mock_records": {"dayan_mock_records", "erp_prod"},
+        }
+        return actual in aliases.get(configured, set())
 
     @staticmethod
     def _evaluate_conditions(config: dict[str, object], source_payload: dict[str, JsonValue]) -> bool:
