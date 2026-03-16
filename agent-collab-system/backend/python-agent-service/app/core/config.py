@@ -1,8 +1,29 @@
 import json
 import os
+from pathlib import Path
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import cast
+
+
+def _load_local_env_files() -> None:
+    service_root = Path(__file__).resolve().parents[2]
+    for candidate in (service_root / '.env.local', service_root / '.env'):
+        if not candidate.exists():
+            continue
+        for raw_line in candidate.read_text(encoding='utf-8').splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, value = line.split('=', 1)
+            key = key.strip()
+            if not key or key in os.environ:
+                continue
+            normalized = value.strip().strip('"').strip("'")
+            os.environ[key] = normalized
+
+
+_load_local_env_files()
 
 
 def _get_bool(name: str, default: bool) -> bool:
@@ -54,6 +75,8 @@ class Settings:
     llm_model: str = os.getenv("LLM_MODEL", "gemini-3-flash-preview-thinking")
     llm_request_path: str = os.getenv("LLM_REQUEST_PATH", "/chat/completions")
     llm_timeout_ms: int = _get_int("LLM_TIMEOUT_MS", 30000)
+    gemini_proxy_api_key: str = os.getenv("GEMINI_PROXY_API_KEY", "")
+    gemini_proxy_base_url: str = os.getenv("GEMINI_PROXY_BASE_URL", "")
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "")
     embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "local")
@@ -116,6 +139,8 @@ class Settings:
     def resolved_llm_api_key(self) -> str:
         if self.llm_api_key:
             return self.llm_api_key
+        if self.default_llm_provider == "gemini_proxy" and self.gemini_proxy_api_key:
+            return self.gemini_proxy_api_key
         if self.default_llm_provider == "deepseek":
             return self.deepseek_api_key
         return ""
@@ -124,6 +149,8 @@ class Settings:
     def resolved_llm_base_url(self) -> str:
         if self.llm_base_url:
             return self.llm_base_url.rstrip("/")
+        if self.default_llm_provider == "gemini_proxy" and self.gemini_proxy_base_url:
+            return self.gemini_proxy_base_url.rstrip("/")
         if self.default_llm_provider == "deepseek" and self.deepseek_base_url:
             return self.deepseek_base_url.rstrip("/")
         return ""

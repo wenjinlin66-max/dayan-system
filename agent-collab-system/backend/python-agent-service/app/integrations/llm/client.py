@@ -41,12 +41,7 @@ class LLMClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
-            "temperature": temperature,
-        }
+        payload = self._build_request_payload(messages=messages, temperature=temperature)
 
         async with httpx.AsyncClient(timeout=self.timeout_ms / 1000) as client:
             response = await client.post(url, headers=headers, json=payload)
@@ -57,17 +52,9 @@ class LLMClient:
                 raise RuntimeError("LLM_INVALID_RESPONSE_FORMAT") from exc
 
         payload_dict = cast(dict[str, object], raw_data) if isinstance(raw_data, dict) else {}
-        choices = payload_dict.get("choices")
-        if isinstance(choices, list) and choices:
-            first = cast(object, choices[0])
-            if isinstance(first, dict):
-                first_dict = cast(dict[str, object], first)
-                message = first_dict.get("message")
-                if isinstance(message, dict):
-                    message_dict = cast(dict[str, object], message)
-                    content = message_dict.get("content")
-                    if isinstance(content, str) and content.strip():
-                        return content.strip()
+        content = self._extract_text_content(payload_dict)
+        if content:
+            return content
         raise RuntimeError("LLM_EMPTY_RESPONSE")
 
     async def chat_json(self, *, messages: list[dict[str, str]], temperature: float = 0.2) -> dict[str, object]:
@@ -102,3 +89,61 @@ class LLMClient:
             if isinstance(parsed, dict):
                 return cast(dict[str, object], parsed)
         raise RuntimeError("LLM_INVALID_JSON_RESPONSE")
+
+    def _build_request_payload(self, *, messages: list[dict[str, str]], temperature: float) -> dict[str, object]:
+        normalized_path = self.request_path if self.request_path.startswith('/') else f'/{self.request_path}'
+        if normalized_path == '/responses':
+            system_messages = [item.get('content', '').strip() for item in messages if item.get('role') == 'system' and item.get('content', '').strip()]
+            non_system = [item for item in messages if item.get('role') != 'system']
+            input_parts = [
+                f"{item.get('role', 'user')}: {item.get('content', '').strip()}"
+                for item in non_system
+                if item.get('content', '').strip()
+            ]
+            return {
+                'model': self.model,
+                'input': '\n'.join(input_parts) or 'user: ',
+                'instructions': '\n'.join(system_messages) or None,
+                'temperature': temperature,
+            }
+        return {
+            'model': self.model,
+            'messages': messages,
+            'stream': False,
+            'temperature': temperature,
+        }
+
+    @staticmethod
+    def _extract_text_content(payload_dict: dict[str, object]) -> str:
+        choices = payload_dict.get('choices')
+        if isinstance(choices, list) and choices:
+            first = cast(object, choices[0])
+            if isinstance(first, dict):
+                first_dict = cast(dict[str, object], first)
+                message = first_dict.get('message')
+                if isinstance(message, dict):
+                    message_dict = cast(dict[str, object], message)
+                    content = message_dict.get('content')
+                    if isinstance(content, str) and content.strip():
+                        return content.strip()
+
+        response_content = payload_dict.get('content')
+        if isinstance(response_content, str) and response_content.strip():
+            return response_content.strip()
+        if isinstance(response_content, list):
+            text_chunks: list[str] = []
+            for item in response_content:
+                if not isinstance(item, dict):
+                    continue
+                item_dict = cast(dict[str, object], item)
+                if item_dict.get('type') == 'output_text':
+                    text_value = item_dict.get('text')
+                    if isinstance(text_value, str) and text_value.strip():
+                        text_chunks.append(text_value.strip())
+            if text_chunks:
+                return '\n'.join(text_chunks)
+        if isinstance(payload_dict.get('output_text'), str):
+            output_text = cast(str, payload_dict.get('output_text'))
+            if output_text.strip():
+                return output_text.strip()
+        return ''
