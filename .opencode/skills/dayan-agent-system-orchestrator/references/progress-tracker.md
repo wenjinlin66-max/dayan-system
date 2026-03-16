@@ -86,6 +86,12 @@
 - Records 原有“执行详情查看器”本轮已整体撤回；业务表格区重新只保留最近事件索引，不再在该页展开 execution 详情
 - 工作流执行历史查看能力已落地到两个入口：工作流查看区可查看单条 workflow 的全量执行历史；对话区的部门 workflow 目录可查看当前部门下该 workflow 的执行历史，二者均按执行类型分类展示“执行任务 / 执行对象 / 执行时间”
 - 本轮收尾同步已完成第一批清理：`progress-tracker` 的过期“下一步”已大幅裁剪；RecordsWorkbench 残留 workflow 拉取已移除；`AttachmentPanel.vue` 已删除；`useExecutionStream` 轮询兜底已补错误保护
+- 本轮按最新反馈继续收口：业务表格区右侧最近事件流已改为仅展示“已触发 workflow”的卡片；工作流制作区已补显式“新建工作流”按钮；mock 注入改为“先返回 execution_id、后台继续执行”，后端会逐节点提交 `current_node`，画布可真实显示运行态炫彩高亮；Python 服务已补 `.env.local/.env` 与 `GEMINI_PROXY_*` 兼容读取，避免对话区误报模型未配置
+- 本轮继续推进 relay 联调：本地已补 `python-agent-service/.env.local` 持久化 Gemini 中转配置，后端已支持通过 `LLM_REQUEST_PATH` 在 `/chat/completions` 与 `/responses` 之间切换，前端 Vite 代理也可通过 `VITE_API_TARGET` 指向 8001 等干净实例
+- 已用干净 8001 后端实例完成最小 relay 实测：`create session -> send message('你好')` 已返回真实 assistant 回复，确认 ChatWorkbench 主链不再落入 `LLM_NOT_CONFIGURED` fallback
+- 工作流执行历史查看器已继续增强：历史项现在会显示执行结果摘要，可直接看到本次是否成功、写入到了哪个对象，以及实际写入的字段值，不再只有“执行任务 / 执行对象 / 执行时间”三块粗信息
+- 已定位并修复“看起来停在 decision / history 无结果”的真实链路：问题不在 workflow DAG，而在 mock inject 的后台续跑实现与 `final_output` JSON 快照持久化；修复后同一条 workflow 已重新验证可跑通 `sensor -> decision -> execution`，并能正确写入 `sensor_outputs / decision_outputs / tool_outputs`
+- 已定位并修复“业务表格区改了库存表却不触发 workflow”的来源匹配问题：RecordsWorkbench 发出的事件源为 `dayan_mock_records`，而许多流程配置为 `erp_prod`；后端现已增加 `dayan_mock_records <-> erp_prod` 兼容匹配，库存表更新可直接触发这类正式 ERP 风格的感知流程
 
 ## 进行中模块
 - 感知型智能体详细设计（数据库实时感知优先）
@@ -98,6 +104,12 @@
 - 控制节点详细设计（定义先行，开发后置）
 - workflow 部门化与执行历史查看能力已进入“功能完成，等待权限/分页/竞态等加固”阶段
 - 本地运行环境治理（旧监听、端口冲突、热重载不一致）仍待继续收口
+- 对话区中转 API 连通性已从“仅依赖进程环境”调整为“进程环境 + 本地 env 文件 + gemini proxy 别名兼容”，仍需在实际运行环境补入真实 key/base_url 后再做最终联调确认
+- 本地 relay 配置当前已在 `python-agent-service/.env.local` 落地；但默认 8000 端口仍可能命中旧监听，因此网页实测时优先使用干净 8001 后端实例
+- 浏览器开发态页面当前已能打开 `chat-workbench` 并发送消息；由于 8000 旧监听仍未清理，后续若恢复默认代理口径前仍建议继续使用 8001 干净实例做 relay 联调
+- workflow 历史弹窗的信息密度已进一步提升，但当前仍以单条摘要为主；若后续要支持复杂多节点执行结果逐项展开，可能需要继续拆明细弹层或折叠区
+- 决策型 llm 节点当前仍可能耗时 10~20 秒才进入 execution，这属于真实网关延迟而非“停死”；当前画布与 execution 查询应继续以 `running -> decision -> execution -> finished` 的渐进过程解释给配置员
+- 感知来源元数据当前已新增 `dayan_mock_records` 选项，用于在制作区明确表示“业务表格区临时测试源”；但为兼容旧流程，运行时仍保留 `erp_prod` 与 `dayan_mock_records` 的双向兼容判断
 
 ## 未开始模块
 - 感知型智能体 Go 事件接入实现
@@ -135,6 +147,7 @@
 - `include_all`、`dept_id`、`owner_dept_id` 当前仍偏演示期口径，若不补后端权限闸，进入真实多部门联调时会出现跨部门可见性风险
 - `result_target_dept_id` 当前仅落到配置和执行元数据，尚未真正接到 chat 回传部门决策，容易让配置员误以为跨部门结果投递已生效
 - workflow 执行历史当前按 100 条硬限制返回且无分页元信息，后续若历史量增大会影响可用性与解释性
+- 画布运行态高亮当前依赖 `execution_runs.current_node` 的逐步提交；若后续执行链切到独立 worker / 队列消费，需要同步维护等价的节点状态推送口径，避免高亮重新退化为终态展示
 
 ## 下一步
 - 为 `include_all / dept_id / owner_dept_id` 增加后端权限闸，收口 workflow 查看区与执行历史查询的跨部门可见性
@@ -145,7 +158,13 @@
 - 补齐 `department_table` 的真实 route registry、权限/幂等校验、审批恢复后单次写入验证与契约测试
 - 继续推进对话型智能体：候选 workflow 歧义消解、参数补齐、审批恢复卡片与消息流结构化结果展示
 - 准备 M5 收口前置项：监控 incident 模型、执行列表/异常统计、以及关键 execution 主链的契约/集成测试
+- 在已补 `.env.local/.env` 读取后，用真实 Gemini 中转配置重新验证 ChatWorkbench 的 ask 路径，确认不再落入 `LLM_NOT_CONFIGURED` fallback
+- 在 8000 旧监听彻底清理后，把前端默认代理目标重新收回单实例开发口径，避免每次联调都依赖 `VITE_API_TARGET`
+- 继续观察 workflow 执行历史里“多节点、多次写入”的展示需求；若单条 history item 同时包含多个 tool output，后续需要从“首条结果摘要”升级为“多结果列表”
+- 若后续仍出现“status 已 finished 但 history/tool_outputs 为空”，优先排查是否存在未重启后端实例吃到旧代码，而不是先怀疑 workflow 配置本身
+- 后续若要彻底去掉兼容分支，应统一 `sensor_metadata.py` 与 RecordsWorkbench 真实发出的 `source_system` 命名，不再让 `erp_prod` 与 `dayan_mock_records` 双轨并存
 
 ## 文档同步状态
-- 本轮已重点复核并再次同步：`progress-tracker.md`（清理大量过期“下一步”、重写当前里程碑/阶段目标/风险/阻塞/下一步）、`frontend-code-structure.md`（补 workflow 执行历史查看器与 records 页定位变化）、`python-service-api.md`（补 workflow 执行历史接口）、`api-event-contracts.md`（补 workflow 历史查询契约）、`change-log.md`（补本轮收尾同步记录）
+- 本轮已重点复核并再次同步：`progress-tracker.md`（补 workflow 历史结果增强、relay 联调状态与 mock inject/runtime 修复事实）、`frontend-code-structure.md`（补执行历史结果展示口径）、`python-service-api.md`（补 workflow history 新增结果字段与 mock inject 持久化规则）、`python-environment-config.md`（补 relay 请求路径切换与前端代理目标切换）、`third-party-dependencies.md`（补 OpenAI-compatible relay Chat/Responses 口径）、`change-log.md`（补本轮实现留痕）
+- 本轮已重点复核并再次同步：`progress-tracker.md`（补业务表格区触发兼容修复）、`frontend-code-structure.md`（补表格区触发正式 ERP 风格流程的兼容口径）、`python-service-api.md`（补表格区 source_system 兼容规则）、`python-environment-config.md`（补 relay 请求路径切换与前端代理目标切换）、`third-party-dependencies.md`（补 OpenAI-compatible relay Chat/Responses 口径）、`change-log.md`（补本轮实现留痕）
 - 其余已在前几轮同步过且本轮未发生事实变化的 references，本轮不再重复改写

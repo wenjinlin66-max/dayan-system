@@ -142,7 +142,10 @@ Python 服务对外提供 5 类能力：
 - 若 graph 中包含 `dialog_agent -> decision_agent -> execution_agent` 这类最小链路，execution 结果会同步回填到 `final_output`
 - `GET /api/v1/executions/:execution_id/stream` 因此不再只看到静态 `running`，而会读到已完成后的终态快照
 - `DELETE /api/v1/executions/:execution_id` 当前会按 `dept_id` 做权限校验，并同步清理 `execution_runs`、`execution_checkpoints`、审批任务镜像，以及 Mock Records 最近事件中的 `triggered_execution_ids` 引用
-- `GET /api/v1/executions/workflow/:workflow_id/history` 当前返回 workflow 级执行历史摘要，面向查看区与对话区历史查看器，输出已规整为 `execution_type / task_summary / target_summary / started_at / updated_at`
+- `GET /api/v1/executions/workflow/:workflow_id/history` 当前返回 workflow 级执行历史摘要，面向查看区与对话区历史查看器；除 `execution_type / task_summary / target_summary / started_at / updated_at` 外，还会返回 `result_status / result_summary / result_details[]`，用于展示“是否成功 / 改了什么 / 写入了哪些字段值”
+- `POST /api/v1/executions/inject/mock-event` 当前使用 FastAPI `BackgroundTasks` 在返回 `execution_id` 后继续后台推进 execution；不再使用 `asyncio.create_task(...)` 直接裸起任务，以降低 Windows/本地开发态下 mock inject 续跑失效的概率
+- runtime 在持久化 `final_output` 与 checkpoint 时，当前会对 `history / context / sensor_outputs / decision_outputs / tool_outputs / errors` 做独立快照，避免 JSON 字段因复用原始引用而出现“current_node 已推进，但 final_output 仍为空”的脏写现象
+- 业务表格区自动触发 workflow 时，当前对 `source_system` 做临时兼容：`dayan_mock_records` 产生的表格变更事件可匹配配置为 `erp_prod` 的感知 workflow，便于配置员在临时测试表上验证正式 ERP 风格的低库存流程
 
 ### 8.1 department_table adapter 当前行为
 - `execution_agent` 不再直接内嵌 mock writer，而是通过 `ToolRegistry` 解析 `department_table` writer
