@@ -80,7 +80,8 @@
             </div>
           </div>
 
-          <div class="md:col-span-2 xl:col-span-5 flex flex-wrap items-end gap-1.5">
+            <div class="md:col-span-2 xl:col-span-5 flex flex-wrap items-end gap-1.5">
+            <el-button type="primary" plain @click="handleCreateWorkflow">新建工作流</el-button>
             <el-button @click="saveDraft">保存草稿</el-button>
             <el-button @click="compile">编译</el-button>
             <el-button type="success" :disabled="!canPublish" @click="publish">发布</el-button>
@@ -173,23 +174,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import WorkflowCanvas from '@/components/canvas/WorkflowCanvas.vue'
 import WorkspaceTopNav from '@/components/layout/WorkspaceTopNav.vue'
 import NodeConfigPanel from '@/components/canvas/NodeConfigPanel.vue'
 import { useWorkflowPublish } from '@/composables/useWorkflowPublish'
-import { injectMockEvent } from '@/api/executions'
+import { fetchExecution, injectMockEvent } from '@/api/executions'
 import { useWorkflowStore } from '@/store/workflow'
 import { ERP_DEPARTMENT_OPTIONS, getDepartmentLabel } from '@/utils/erpDepartments'
 import { WORKFLOW_TRIGGER_TYPE_OPTIONS } from '@/utils/workflowCategory'
+import type { ExecutionStatus } from '@/types/execution'
 
 import { ElMessageBox } from 'element-plus'
 
 const workflowStore = useWorkflowStore()
 const route = useRoute()
+const router = useRouter()
 
 const selectedWorkflowToLoad = ref('')
 const mockEventDialogVisible = ref(false)
@@ -203,6 +206,7 @@ const mockChangedFieldsText = ref('stock_count,updated_at')
 const mockAfterJson = ref('{\n  "item_id": "A-1001",\n  "stock_count": 16,\n  "safety_limit": 20,\n  "warehouse_id": "W-01"\n}')
 const mockBeforeJson = ref('{\n  "item_id": "A-1001",\n  "stock_count": 18,\n  "safety_limit": 20,\n  "warehouse_id": "W-01"\n}')
 const latestMockExecution = ref('')
+let runtimePollTimer: number | null = null
 
 const workflowNameProxy = computed({
   get: () => workflowStore.workflowName,
@@ -236,14 +240,52 @@ const workflowDepartmentOptions = computed(() => ERP_DEPARTMENT_OPTIONS.filter((
 
 const { canPublish, saveDraft, compile, publish, refreshWorkflowList, loadWorkflow, removeWorkflow } = useWorkflowPublish()
 
+const stopRuntimeTracking = () => {
+  if (runtimePollTimer !== null) {
+    window.clearInterval(runtimePollTimer)
+    runtimePollTimer = null
+  }
+}
+
+const syncRuntimeExecution = (payload: ExecutionStatus) => {
+  workflowStore.setRuntimeExecution({
+    executionId: payload.execution_id,
+    status: payload.status,
+    currentNode: payload.current_node,
+  })
+}
+
+const startRuntimeTracking = async (executionId: string) => {
+  stopRuntimeTracking()
+  try {
+    const initial = await fetchExecution(executionId)
+    syncRuntimeExecution(initial.data)
+  } catch {
+    workflowStore.setRuntimeExecution({ executionId, status: 'running', currentNode: null })
+  }
+
+  runtimePollTimer = window.setInterval(async () => {
+    try {
+      const response = await fetchExecution(executionId)
+      syncRuntimeExecution(response.data)
+      if (['finished', 'failed', 'cancelled', 'waiting_approval'].includes(response.data.status)) {
+        stopRuntimeTracking()
+      }
+    } catch {
+      workflowStore.clearRuntimeExecution()
+      stopRuntimeTracking()
+    }
+  }, 900)
+}
+
 onMounted(async () => {
   workflowStore.ensureDraftMeta()
   await refreshWorkflowList()
   const routeWorkflowId = typeof route.query.workflowId === 'string' ? route.query.workflowId : ''
-  if (routeWorkflowId) {
-    selectedWorkflowToLoad.value = routeWorkflowId
-    await loadWorkflow(routeWorkflowId)
-  }
+    if (routeWorkflowId) {
+      selectedWorkflowToLoad.value = routeWorkflowId
+      await loadWorkflow(routeWorkflowId)
+    }
 })
 
 watch(
@@ -254,6 +296,8 @@ watch(
       return
     }
     selectedWorkflowToLoad.value = routeWorkflowId
+    workflowStore.clearRuntimeExecution()
+    stopRuntimeTracking()
     await loadWorkflow(routeWorkflowId)
   },
 )
@@ -353,6 +397,7 @@ const submitMockEvent = async () => {
     })
 
     latestMockExecution.value = `${response.data.execution_id} · ${response.data.status}`
+    await startRuntimeTracking(String(response.data.execution_id))
     ElMessage.success('模拟感知事件已注入，感知链路开始执行。')
     mockEventDialogVisible.value = false
   } catch (error) {
@@ -378,7 +423,42 @@ const handleLoadWorkflow = async (workflowIdToLoad: string) => {
       return
     }
   }
+  workflowStore.clearRuntimeExecution()
+  stopRuntimeTracking()
   await loadWorkflow(workflowIdToLoad)
+}
+
+const executeCreateWorkflow = async () => {
+  const nextDeptId = workflowStore.ownerDeptId
+  const nextCategory = workflowStore.workflowCategory
+  selectedWorkflowToLoad.value = ''
+  latestMockExecution.value = ''
+  workflowStore.resetWorkflowEditor()
+  workflowStore.setWorkflowMeta({
+    ownerDeptId: nextDeptId,
+    workflowCategory: nextCategory,
+  })
+  workflowStore.ensureDraftMeta()
+  workflowStore.clearRuntimeExecution()
+  stopRuntimeTracking()
+  if (route.query.workflowId) {
+    await router.replace({ query: { ...route.query, workflowId: undefined } })
+  }
+}
+
+const handleCreateWorkflow = async () => {
+  if (workflowStore.isDirty && (workflowStore.nodes.length > 0 || workflowStore.edges.length > 0 || workflowStore.currentWorkflowId)) {
+    try {
+      await ElMessageBox.confirm('当前 workflow 存在未保存修改，创建新工作流会清空当前画布。是否继续？', '新建工作流', {
+        confirmButtonText: '继续创建',
+        cancelButtonText: '取消',
+        type: 'warning',
+      })
+    } catch {
+      return
+    }
+  }
+  await executeCreateWorkflow()
 }
 
 const handleDeleteWorkflow = async () => {
@@ -396,5 +476,11 @@ const handleDeleteWorkflow = async () => {
   }
   await removeWorkflow(workflowId.value)
   selectedWorkflowToLoad.value = ''
+  workflowStore.clearRuntimeExecution()
+  stopRuntimeTracking()
 }
+
+onBeforeUnmount(() => {
+  stopRuntimeTracking()
+})
 </script>

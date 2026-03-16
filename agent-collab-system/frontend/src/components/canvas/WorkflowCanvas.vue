@@ -17,6 +17,15 @@
         <div class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-500">
           {{ nodes.length }} 个节点 · {{ edges.length }} 条连线
         </div>
+        <div
+          v-if="activeExecutionId"
+          class="rounded-full border px-3 py-1.5 text-xs font-medium"
+          :class="activeExecutionStatus === 'running'
+            ? 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 shadow-[0_0_24px_rgba(217,70,239,0.16)]'
+            : 'border-slate-200 bg-white text-slate-500'"
+        >
+          {{ runtimeStatusLabel }}
+        </div>
         <el-button plain @click="resetCanvas">初始化示例流程</el-button>
         <el-button plain type="danger" :disabled="!selectedNodeId" @click="deleteSelectedNode">删除节点</el-button>
         <el-button plain type="danger" :disabled="!selectedEdgeId" @click="deleteSelectedEdge">删除连线</el-button>
@@ -118,6 +127,7 @@ const flowNodes = computed<FlowNode[]>(() =>
         type: node.type,
         typeLabel: typeLabels[node.type] ?? node.type,
         description: resolveNodeDescription(node),
+        isExecuting: workflowStore.activeRuntimeNodeId === node.id && workflowStore.activeExecutionStatus === 'running',
       },
     })),
 )
@@ -166,6 +176,27 @@ const handleNodeClick = (event: NodeMouseEvent) => {
 
 const selectedNodeId = computed(() => workflowStore.selectedNodeId)
 const selectedEdgeId = computed(() => workflowStore.selectedEdgeId)
+const activeExecutionId = computed(() => workflowStore.activeExecutionId)
+const activeRuntimeNode = computed(() => nodes.value.find((node) => node.id === workflowStore.activeRuntimeNodeId))
+const activeExecutionStatus = computed(() => workflowStore.activeExecutionStatus)
+const runtimeStatusLabel = computed(() => {
+  if (!activeExecutionId.value) {
+    return ''
+  }
+  if (activeExecutionStatus.value === 'running') {
+    return `运行中 · ${activeRuntimeNode.value?.label || workflowStore.activeRuntimeNodeId || '等待节点状态'}`
+  }
+  if (activeExecutionStatus.value === 'waiting_approval') {
+    return `等待审批 · ${activeRuntimeNode.value?.label || workflowStore.activeRuntimeNodeId || '审批节点'}`
+  }
+  if (activeExecutionStatus.value === 'finished') {
+    return '最近一次运行已完成'
+  }
+  if (activeExecutionStatus.value === 'failed') {
+    return '最近一次运行失败'
+  }
+  return `执行状态 · ${activeExecutionStatus.value}`
+})
 
 const handleEdgeClick = (event: EdgeMouseEvent) => {
   workflowStore.selectEdge(String(event.edge.id))

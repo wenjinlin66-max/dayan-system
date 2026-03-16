@@ -33,6 +33,9 @@ export const useWorkflowStore = defineStore('workflow', {
     compileResult: null as WorkflowCompileResult | null,
     currentRelease: null as WorkflowCompileResult | null,
     activeAction: '' as '' | 'save' | 'compile' | 'publish' | 'load',
+    activeExecutionId: '' as string,
+    activeExecutionStatus: '' as string,
+    activeRuntimeNodeId: '' as string,
   }),
   getters: {
     selectedNode(state): WorkflowNode | undefined {
@@ -102,6 +105,9 @@ export const useWorkflowStore = defineStore('workflow', {
       this.compileResult = null
       this.currentRelease = null
       this.versions = []
+      this.activeExecutionId = ''
+      this.activeExecutionStatus = ''
+      this.activeRuntimeNodeId = ''
     },
     addNode(type: string, label?: string) {
       const id = `node_${Date.now()}_${this.nodes.length + 1}`
@@ -244,6 +250,9 @@ export const useWorkflowStore = defineStore('workflow', {
       this.compileResult = draftSnapshot
       this.currentRelease = releaseSnapshot
       this.versions = versionSnapshots
+      this.activeExecutionId = ''
+      this.activeExecutionStatus = ''
+      this.activeRuntimeNodeId = ''
     },
     setWorkflowMeta(payload: { name?: string; code?: string; workflowId?: string; workflowCategory?: WorkflowCategoryValue; ownerDeptId?: ErpDepartmentValue }) {
       if (payload.name !== undefined) {
@@ -284,6 +293,16 @@ export const useWorkflowStore = defineStore('workflow', {
     },
     setAvailableWorkflows(workflows: WorkflowSummary[]) {
       this.availableWorkflows = workflows
+    },
+    setRuntimeExecution(payload: { executionId?: string; status?: string; currentNode?: string | null }) {
+      this.activeExecutionId = payload.executionId ?? ''
+      this.activeExecutionStatus = payload.status ?? ''
+      this.activeRuntimeNodeId = payload.currentNode ?? ''
+    },
+    clearRuntimeExecution() {
+      this.activeExecutionId = ''
+      this.activeExecutionStatus = ''
+      this.activeRuntimeNodeId = ''
     },
   },
 })
