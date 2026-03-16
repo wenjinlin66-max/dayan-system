@@ -3,7 +3,7 @@ import json
 from time import monotonic
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,17 @@ from app.mock_records.repository.records_repository import MockRecordsRepository
 from app.schemas.execution import ExecutionStartRequest, ExecutionStatusResponse, MockEventInjectRequest, ExecutionTrigger, ExecutionOperator, WorkflowExecutionHistoryResponse
 
 router = APIRouter()
+
+
+async def continue_execution_in_background(execution_id: str) -> None:
+    session_factory = get_session_factory()
+    async with session_factory() as background_session:
+        service = build_service(background_session)
+        try:
+            _ = await service.continue_execution(execution_id)
+        except Exception:
+            await background_session.rollback()
+            return
 
 
 def build_service(session: AsyncSession) -> ExecutionService:
@@ -42,6 +53,7 @@ async def start_execution(
 @router.post("/inject/mock-event", response_model=ExecutionStatusResponse)
 async def mock_event_inject(
     payload: MockEventInjectRequest,
+    background_tasks: BackgroundTasks,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ExecutionStatusResponse:
@@ -69,7 +81,9 @@ async def mock_event_inject(
         },
     )
     try:
-        return await service.start(start_payload, dept_id=context.dept_id, user_id=context.user_id)
+        initial = await service.create_pending_run(start_payload, dept_id=context.dept_id, user_id=context.user_id)
+        background_tasks.add_task(continue_execution_in_background, initial.execution_id)
+        return initial
     except ValueError as exc:
         detail = str(exc)
         code = status.HTTP_404_NOT_FOUND if detail in {"WORKFLOW_VERSION_NOT_FOUND", "RELEASE_NOT_FOUND"} else status.HTTP_400_BAD_REQUEST

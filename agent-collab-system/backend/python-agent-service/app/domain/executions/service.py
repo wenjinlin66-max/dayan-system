@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import cast
 from uuid import uuid4
@@ -51,6 +52,16 @@ class ExecutionService:
         dept_id: str,
         user_id: str,
     ) -> ExecutionStatusResponse:
+        initial = await self.create_pending_run(payload, dept_id=dept_id, user_id=user_id)
+        return await self.continue_execution(initial.execution_id)
+
+    async def create_pending_run(
+        self,
+        payload: ExecutionStartRequest,
+        *,
+        dept_id: str,
+        user_id: str,
+    ) -> ExecutionStatusResponse:
         effective_dept_id = payload.dept_id or dept_id
         workflow_version = await self._resolve_workflow_version(payload, dept_id=effective_dept_id)
         execution_id = f"exec_{uuid4().hex[:12]}"
@@ -92,18 +103,34 @@ class ExecutionService:
         )
         _ = await self.execution_repository.create_checkpoint(checkpoint)
 
+        await self.execution_repository.session.commit()
+        latest_run = await self.execution_repository.get_run(execution_id)
+        if latest_run is None:
+            raise ValueError("EXECUTION_NOT_FOUND")
+        return self._to_response(latest_run)
+
+    async def continue_execution(self, execution_id: str) -> ExecutionStatusResponse:
+        run = await self.execution_repository.get_run(execution_id)
+        if run is None:
+            raise ValueError("EXECUTION_NOT_FOUND")
+
+        workflow_version = await self._get_workflow_version(run.workflow_id, run.workflow_version, run.mode)
+        trigger_payload = self._extract_nested_dict(run.context_snapshot, "trigger")
+        input_payload = self._extract_nested_dict(run.context_snapshot, "input")
+        trigger_session_id = trigger_payload.get("session_id")
+        session_id = str(trigger_session_id) if isinstance(trigger_session_id, str) else None
         runtime_state = RuntimeState(
             execution_id=execution_id,
-            workflow_id=payload.workflow_id,
-            workflow_version=workflow_version.version,
-            dept_id=effective_dept_id,
-            current_node=entrypoint,
-            input_payload=self._coerce_json_dict(payload.input),
-            context={
-                "operator_id": payload.operator.user_id if payload.operator else user_id,
-                "trigger_type": trigger.type,
-                "chat_session_id": trigger.session_id,
-            },
+            workflow_id=run.workflow_id,
+            workflow_version=run.workflow_version,
+            dept_id=run.dept_id,
+            current_node=run.current_node or run.entry_node,
+            input_payload=self._coerce_json_dict(input_payload),
+            context=self._coerce_json_dict({
+                "operator_id": run.started_by,
+                "trigger_type": run.trigger_type,
+                "chat_session_id": session_id,
+            }),
         )
 
         try:
@@ -119,8 +146,8 @@ class ExecutionService:
                     final_output=self._build_final_output(runtime_state),
                     finished_at=None if paused else datetime.now(timezone.utc),
                     context_snapshot={
-                        "trigger": trigger.model_dump(),
-                        "input": payload.input,
+                        "trigger": trigger_payload,
+                        "input": input_payload,
                         "history": runtime_state.history,
                         "approval_title": runtime_state.context.get("approval_title"),
                         "approval_summary": runtime_state.context.get("approval_summary"),
@@ -130,10 +157,10 @@ class ExecutionService:
                 )
                 if not paused:
                     await self._append_execution_message(
-                        session_id=trigger.session_id,
-                        dept_id=effective_dept_id,
+                        session_id=session_id,
+                        dept_id=run.dept_id,
                         execution_id=execution_id,
-                        workflow_id=payload.workflow_id,
+                        workflow_id=run.workflow_id,
                         status=status_value,
                         current_node=runtime_state.current_node,
                     )
@@ -147,10 +174,28 @@ class ExecutionService:
                 finished_at=datetime.now(timezone.utc),
             )
             await self._append_execution_message(
-                session_id=trigger.session_id,
-                dept_id=effective_dept_id,
+                session_id=session_id,
+                dept_id=run.dept_id,
                 execution_id=execution_id,
-                workflow_id=payload.workflow_id,
+                workflow_id=run.workflow_id,
+                status="failed",
+                current_node=runtime_state.current_node,
+                error_summary=str(exc),
+            )
+        except Exception as exc:
+            await self.execution_repository.update_run(
+                execution_id,
+                current_node=runtime_state.current_node,
+                status="failed",
+                error_summary=str(exc),
+                final_output=self._build_final_output(runtime_state),
+                finished_at=datetime.now(timezone.utc),
+            )
+            await self._append_execution_message(
+                session_id=session_id,
+                dept_id=run.dept_id,
+                execution_id=execution_id,
+                workflow_id=run.workflow_id,
                 status="failed",
                 current_node=runtime_state.current_node,
                 error_summary=str(exc),
@@ -295,6 +340,13 @@ class ExecutionService:
                 raise ValueError("EXECUTION_NODE_NOT_FOUND")
 
             state.current_node = current_node_id
+            await self.execution_repository.update_run(
+                state.execution_id,
+                current_node=current_node_id,
+                status="running",
+                final_output=self._build_final_output(state),
+            )
+            await self.execution_repository.session.commit()
             handler = dispatcher.get_handler(node.type)
             if handler is None:
                 raise ValueError(f"HANDLER_NOT_IMPLEMENTED:{node.type}")
@@ -315,15 +367,22 @@ class ExecutionService:
                 thread_id=state.execution_id,
                 checkpoint_data={
                     "current_node": node.id,
-                    "dialog_outputs": state.dialog_outputs,
-                    "history": state.history,
-                    "sensor_outputs": state.sensor_outputs,
-                    "tool_outputs": state.tool_outputs,
-                    "decision_outputs": state.decision_outputs,
+                    "dialog_outputs": deepcopy(state.dialog_outputs),
+                    "history": deepcopy(state.history),
+                    "sensor_outputs": deepcopy(state.sensor_outputs),
+                    "tool_outputs": deepcopy(state.tool_outputs),
+                    "decision_outputs": deepcopy(state.decision_outputs),
                 },
                 current_node=node.id,
             )
             _ = await self.execution_repository.create_checkpoint(checkpoint)
+            await self.execution_repository.update_run(
+                state.execution_id,
+                current_node=node.id,
+                status="running",
+                final_output=self._build_final_output(state),
+            )
+            await self.execution_repository.session.commit()
             if result.pause_execution:
                 return True
             current_node_id = result.next_node_id if result.route_decided else (result.next_node_id or (next_nodes[0] if next_nodes else None))
@@ -353,13 +412,13 @@ class ExecutionService:
     @staticmethod
     def _build_final_output(state: RuntimeState) -> dict[str, JsonValue]:
         return {
-            "history": cast(list[JsonValue], state.history),
-            "context": state.context,
-            "dialog_outputs": cast(dict[str, JsonValue], state.dialog_outputs),
-            "sensor_outputs": cast(dict[str, JsonValue], state.sensor_outputs),
-            "decision_outputs": cast(dict[str, JsonValue], state.decision_outputs),
-            "tool_outputs": cast(dict[str, JsonValue], state.tool_outputs),
-            "errors": cast(list[JsonValue], state.errors),
+            "history": cast(list[JsonValue], deepcopy(state.history)),
+            "context": cast(dict[str, JsonValue], deepcopy(state.context)),
+            "dialog_outputs": cast(dict[str, JsonValue], deepcopy(state.dialog_outputs)),
+            "sensor_outputs": cast(dict[str, JsonValue], deepcopy(state.sensor_outputs)),
+            "decision_outputs": cast(dict[str, JsonValue], deepcopy(state.decision_outputs)),
+            "tool_outputs": cast(dict[str, JsonValue], deepcopy(state.tool_outputs)),
+            "errors": cast(list[JsonValue], deepcopy(state.errors)),
         }
 
     @staticmethod
@@ -485,9 +544,14 @@ class ExecutionService:
         tool_outputs = final_output.get("tool_outputs") if isinstance(final_output.get("tool_outputs"), dict) else {}
         sensor_outputs = final_output.get("sensor_outputs") if isinstance(final_output.get("sensor_outputs"), dict) else {}
         dialog_outputs = final_output.get("dialog_outputs") if isinstance(final_output.get("dialog_outputs"), dict) else {}
+        updated_at = run.finished_at or run.started_at
+        result_status, result_summary, result_details = ExecutionService._build_history_result(
+            run.status,
+            final_output=final_output,
+        )
 
         if tool_outputs:
-            first_tool = next(iter(tool_outputs.values()))
+            first_tool = next(iter(cast(dict[str, object], tool_outputs).values()))
             execution_type = "表格执行"
             task_summary = "执行型智能体写入业务目标"
             target_summary = "未知目标"
@@ -511,8 +575,11 @@ class ExecutionService:
                 execution_type=execution_type,
                 task_summary=task_summary,
                 target_summary=target_summary,
+                result_status=result_status,
+                result_summary=result_summary,
+                result_details=result_details,
                 started_at=run.started_at.isoformat() if run.started_at else None,
-                updated_at=(run.finished_at or run.started_at).isoformat() if (run.finished_at or run.started_at) else None,
+                updated_at=updated_at.isoformat() if updated_at else None,
             )
 
         if sensor_outputs:
@@ -525,8 +592,11 @@ class ExecutionService:
                 execution_type="感知触发",
                 task_summary="感知型智能体处理事件",
                 target_summary=run.trigger_event_id or run.trigger_type,
+                result_status=result_status,
+                result_summary=result_summary,
+                result_details=result_details,
                 started_at=run.started_at.isoformat() if run.started_at else None,
-                updated_at=(run.finished_at or run.started_at).isoformat() if (run.finished_at or run.started_at) else None,
+                updated_at=updated_at.isoformat() if updated_at else None,
             )
 
         if dialog_outputs:
@@ -539,8 +609,11 @@ class ExecutionService:
                 execution_type="对话执行",
                 task_summary="对话型智能体响应会话",
                 target_summary=run.correlation_id or "部门对话框",
+                result_status=result_status,
+                result_summary=result_summary,
+                result_details=result_details,
                 started_at=run.started_at.isoformat() if run.started_at else None,
-                updated_at=(run.finished_at or run.started_at).isoformat() if (run.finished_at or run.started_at) else None,
+                updated_at=updated_at.isoformat() if updated_at else None,
             )
 
         return WorkflowExecutionHistoryItem(
@@ -552,9 +625,82 @@ class ExecutionService:
             execution_type="通用执行",
             task_summary=f"{run.trigger_type} 类型流程执行",
             target_summary=run.current_node or run.entry_node,
+            result_status=result_status,
+            result_summary=result_summary,
+            result_details=result_details,
             started_at=run.started_at.isoformat() if run.started_at else None,
-            updated_at=(run.finished_at or run.started_at).isoformat() if (run.finished_at or run.started_at) else None,
+            updated_at=updated_at.isoformat() if updated_at else None,
         )
+
+    @staticmethod
+    def _build_history_result(
+        status: str,
+        *,
+        final_output: dict[str, object],
+    ) -> tuple[str, str, list[str]]:
+        tool_outputs = final_output.get("tool_outputs") if isinstance(final_output.get("tool_outputs"), dict) else {}
+        decision_outputs = final_output.get("decision_outputs") if isinstance(final_output.get("decision_outputs"), dict) else {}
+        if isinstance(tool_outputs, dict) and tool_outputs:
+            first_tool = next(iter(cast(dict[str, object], tool_outputs).values()))
+            if isinstance(first_tool, dict):
+                raw_result = first_tool.get("result")
+                raw_request_payload = first_tool.get("request_payload")
+                result: dict[str, object] = cast(dict[str, object], raw_result) if isinstance(raw_result, dict) else {}
+                request_payload: dict[str, object] = cast(dict[str, object], raw_request_payload) if isinstance(raw_request_payload, dict) else {}
+                result_status = str(result.get("status") or ("succeeded" if status == "finished" else status))
+                operation = str(request_payload.get("operation") or result.get("operation") or "执行写入")
+                table_id = str(result.get("table_id") or request_payload.get("target_code") or "未知对象")
+                raw_row_payload = result.get("row_payload")
+                row_payload: dict[str, object] = cast(dict[str, object], raw_row_payload) if isinstance(raw_row_payload, dict) else {}
+                detail_items = [
+                    f"{key} = {ExecutionService._format_history_value(value)}"
+                    for key, value in cast(dict[str, object], row_payload).items()
+                    if key not in {"updated_at", "created_at"}
+                ]
+                summary = str(result.get("summary") or f"{operation} 已作用到 {table_id}")
+                return result_status, summary, detail_items[:8]
+
+        if isinstance(decision_outputs, dict) and decision_outputs:
+            first_decision = next(iter(cast(dict[str, object], decision_outputs).values()))
+            if isinstance(first_decision, dict):
+                decision_payload = first_decision.get("decision_payload") if isinstance(first_decision.get("decision_payload"), dict) else {}
+                recommended_actions = first_decision.get("recommended_actions") if isinstance(first_decision.get("recommended_actions"), list) else []
+                target_item_id = decision_payload.get("target_item_id") if isinstance(decision_payload, dict) else None
+                recommended_quantity = decision_payload.get("recommended_quantity") if isinstance(decision_payload, dict) else None
+                risk_level = first_decision.get("risk_level")
+                detail_items: list[str] = []
+                if target_item_id is not None:
+                    detail_items.append(f"target_item_id = {ExecutionService._format_history_value(target_item_id)}")
+                if recommended_quantity is not None:
+                    detail_items.append(f"recommended_quantity = {ExecutionService._format_history_value(recommended_quantity)}")
+                if risk_level is not None:
+                    detail_items.append(f"risk_level = {ExecutionService._format_history_value(risk_level)}")
+                if recommended_actions:
+                    detail_items.append(f"recommended_actions = {len(cast(list[object], recommended_actions))} 条")
+                decision_summary = str(first_decision.get("decision_summary") or "已完成决策，但尚未产生执行写入结果。")
+                if status == "waiting_approval":
+                    return "waiting_approval", f"{decision_summary}（当前等待审批）", detail_items[:8]
+                return "decision_only", f"{decision_summary}（尚未看到执行写入结果）", detail_items[:8]
+
+        if status == "finished":
+            return "succeeded", "流程已执行完成，但当前没有结构化写入结果。", []
+        if status == "failed":
+            return "failed", "本次执行失败，未完成预期写入。", []
+        if status == "waiting_approval":
+            return "waiting_approval", "流程已运行到审批节点，结果尚未最终落地。", []
+        return status, "当前没有可展示的结果摘要。", []
+
+    @staticmethod
+    def _format_history_value(value: object) -> str:
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, str):
+            return value
+        return str(value)
 
     @staticmethod
     def _to_response(run: ExecutionRun) -> ExecutionStatusResponse:
