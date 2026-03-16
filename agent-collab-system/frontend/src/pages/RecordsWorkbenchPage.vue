@@ -1,14 +1,10 @@
 <template>
   <div class="min-h-screen bg-[linear-gradient(180deg,#ecf6ff_0%,#f8fbff_42%,#eef2f7_100%)] p-6 text-slate-900">
-    <WorkspaceTopNav title="业务表格区" description="临时测试工作区：查看 dayan_mock_records 中的真实业务表，改表后直接触发感知型工作流并观察写回结果。" />
+    <WorkspaceTopNav title="业务表格区" description="临时测试工作区：直接改表并触发感知链路，当前页面只保留真实表格与已触发的最近流程。" />
 
     <div class="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
       <aside class="rounded-[28px] border border-slate-200/80 bg-white/92 p-4 shadow-[0_22px_60px_rgba(15,23,42,0.08)]">
-        <div class="text-[11px] uppercase tracking-[0.24em] text-cyan-700/75">Source & Tables</div>
-        <div class="mt-3 rounded-2xl border border-cyan-100 bg-cyan-50/70 px-3 py-2 text-sm text-cyan-900">
-          <div class="font-medium">{{ currentSourceLabel }}</div>
-          <div class="mt-1 text-xs text-cyan-700/80">当前是临时测试底座，后续 Go 正式接管后将整体删除。</div>
-        </div>
+        <div class="text-[11px] uppercase tracking-[0.24em] text-cyan-700/75">Tables</div>
 
         <div class="mt-4 space-y-2">
           <button
@@ -29,7 +25,7 @@
           <div>
             <div class="text-[11px] uppercase tracking-[0.24em] text-slate-500">Table Workbench</div>
             <div class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{{ currentSchema?.label || '选择业务表' }}</div>
-            <div class="mt-1 text-sm text-slate-500">{{ currentTable }}</div>
+             <div class="mt-1 text-sm text-slate-500">{{ currentTable }}</div>
           </div>
           <div class="flex flex-wrap gap-3">
             <el-button @click="refreshCurrentTable">刷新</el-button>
@@ -64,11 +60,12 @@
 
       <aside class="rounded-[28px] border border-slate-200/80 bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] p-4 shadow-[0_22px_60px_rgba(15,23,42,0.08)]">
         <div class="flex items-center justify-between gap-3">
-          <div class="text-[11px] uppercase tracking-[0.24em] text-violet-700/70">Recent Trigger Stream</div>
+          <div class="text-[11px] uppercase tracking-[0.24em] text-violet-700/70">Triggered Workflows</div>
+          <div class="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[11px] text-violet-700">{{ triggeredRecentEvents.length }} 条已触发</div>
         </div>
         <div class="mt-3 max-h-[620px] space-y-3 overflow-y-auto pr-1">
           <div
-            v-for="event in recentEvents"
+            v-for="event in triggeredRecentEvents"
             :key="event.change_event_id"
             class="w-full rounded-[22px] border border-slate-200 bg-white/90 p-3 text-left transition hover:border-violet-200 hover:bg-violet-50/40"
           >
@@ -76,15 +73,11 @@
               <div class="text-sm font-semibold text-slate-900">{{ event.table_name }}</div>
               <span class="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] text-violet-700">{{ event.operation }}</span>
             </div>
-            <div class="mt-2 text-xs leading-5 text-slate-500">
-              record_id: {{ event.record_id }}<br />
-              event: {{ event.event_type }}<br />
-              changed: {{ event.changed_fields.join(', ') || '-' }}
-            </div>
-            <div class="mt-2 text-xs text-emerald-700">触发 execution：{{ event.triggered_execution_ids.join(', ') || '无' }}</div>
+            <div class="mt-2 text-xs text-slate-500">记录 {{ event.record_id }} · {{ formatEventTime(event.created_at) }}</div>
+            <div class="mt-2 text-xs text-emerald-700">触发 execution：{{ event.triggered_execution_ids.join(', ') }}</div>
           </div>
-          <div v-if="recentEvents.length === 0" class="rounded-[22px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-sm text-slate-500">
-            暂无最近触发事件。
+          <div v-if="triggeredRecentEvents.length === 0" class="rounded-[22px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-sm text-slate-500">
+            暂无已触发 workflow 的最近事件。
           </div>
         </div>
       </aside>
@@ -132,7 +125,6 @@ import {
   deleteRecordRow,
   fetchRecentRecordEvents,
   fetchRecordRows,
-  fetchRecordSources,
   fetchRecordTables,
   fetchRecordTableSchema,
   updateRecordRow,
@@ -153,9 +145,9 @@ const currentTable = computed(() => recordsStore.currentTable)
 const currentSchema = computed(() => recordsStore.currentSchema)
 const recentEvents = computed(() => recordsStore.recentEvents)
 const lastMutationSummary = computed(() => recordsStore.lastMutationSummary)
-const currentSourceLabel = computed(() => recordsStore.sources[0]?.label ?? 'Mock Records 独立测试库')
 const visibleFields = computed(() => currentSchema.value?.fields ?? [])
 const editableFields = computed(() => visibleFields.value.filter((field) => field.editable))
+const triggeredRecentEvents = computed(() => recentEvents.value.filter((event) => event.triggered_execution_ids.length > 0))
 
 const normalizeValueForField = (field: RecordsTableSchemaField, value: unknown) => {
   if (field.field_type === 'number') {
@@ -165,12 +157,27 @@ const normalizeValueForField = (field: RecordsTableSchemaField, value: unknown) 
 }
 
 const loadSourcesAndTables = async () => {
-  const [sourcesResponse, tablesResponse] = await Promise.all([fetchRecordSources(), fetchRecordTables()])
-  recordsStore.sources = sourcesResponse.data.sources
+  const tablesResponse = await fetchRecordTables()
   recordsStore.tables = tablesResponse.data.tables
   if (!recordsStore.currentTable && recordsStore.tables[0]) {
     recordsStore.currentTable = recordsStore.tables[0].table_name
   }
+}
+
+const formatEventTime = (value?: string | null) => {
+  if (!value) {
+    return '刚刚'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 const loadTableData = async (tableName: string) => {
