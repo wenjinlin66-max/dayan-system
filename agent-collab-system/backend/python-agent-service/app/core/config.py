@@ -75,6 +75,7 @@ class Settings:
     llm_model: str = os.getenv("LLM_MODEL", "gemini-3-flash-preview-thinking")
     llm_request_path: str = os.getenv("LLM_REQUEST_PATH", "/chat/completions")
     llm_timeout_ms: int = _get_int("LLM_TIMEOUT_MS", 30000)
+    allow_header_auth_fallback: bool = os.getenv("ALLOW_HEADER_AUTH_FALLBACK", "false").lower() == "true"
     gemini_proxy_api_key: str = os.getenv("GEMINI_PROXY_API_KEY", "")
     gemini_proxy_base_url: str = os.getenv("GEMINI_PROXY_BASE_URL", "")
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
