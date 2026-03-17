@@ -92,13 +92,31 @@
 - 工作流执行历史查看器已继续增强：历史项现在会显示执行结果摘要，可直接看到本次是否成功、写入到了哪个对象，以及实际写入的字段值，不再只有“执行任务 / 执行对象 / 执行时间”三块粗信息
 - 已定位并修复“看起来停在 decision / history 无结果”的真实链路：问题不在 workflow DAG，而在 mock inject 的后台续跑实现与 `final_output` JSON 快照持久化；修复后同一条 workflow 已重新验证可跑通 `sensor -> decision -> execution`，并能正确写入 `sensor_outputs / decision_outputs / tool_outputs`
 - 已定位并修复“业务表格区改了库存表却不触发 workflow”的来源匹配问题：RecordsWorkbench 发出的事件源为 `dayan_mock_records`，而许多流程配置为 `erp_prod`；后端现已增加 `dayan_mock_records <-> erp_prod` 兼容匹配，库存表更新可直接触发这类正式 ERP 风格的感知流程
+- 已补齐“事件触发型 workflow 结果回传到对话区”的缺口：当执行节点配置 `result_delivery=chat` 但 run 本身没有 `chat_session_id` 时，后端现在会自动复用或创建当前用户在目标部门下的主对话会话，并把执行结果作为 `execution_result` 系统消息写入 chat workbench
+- 部门对话区/CEO 对话区第一版已启动并完成主链：前端不再写死 `demo_user + production`，而是通过身份面板动态切换账号与部门范围；后端 chat/approval API 已支持 CEO `include_all` 查看全部门，普通账号仍按 `dept_id + user_id` 严格隔离
+- CEO 体验本轮继续补全：会话列表支持跨部门总览，消息流可显示部门标签，审批区与执行结果区都已补部门过滤入口，当前查看部门更明显
+- 真正账号登录模型已开始落地：登录页、auth store、Bearer token、`/auth/login`、`/auth/me`、路由守卫和 SSE token 透传都已接通；前端进入工作台前必须先登录原型账号，不再默认依赖 header 伪装
+- 已修复 CEO 单部门聚焦模式的真实可用性问题：此前 CEO 聚焦生产部时会错误退回普通 user 作用域，造成 session/messages 404 和目录空白；现在 CEO 单部门与全部门模式都走一致的跨部门读取链，只是是否传具体 `dept_id` 不同
+- 已修复 CEO workflow 目录重复问题：目录数据在 backend chat service 层按 `workflow_id` 去重，现在生产部只有 2 个 workflow 就只显示 2 张卡片，不再因为 registry 多记录重复成 4 张
+- 已验证 CEO bearer 在生产部视角下可直接调用 `POST /v1/executions/inject/mock-event`，不再出现 404
+- 执行型智能体本轮已继续收口到 Dayan 设计口径：当节点配置 `result_delivery=chat` 时，执行型不仅能在 `department_table` 写入后把结果整理为风险报告回传到对话框，也支持在目标编码留空时进入 chat-only 模式，直接把 `decision_outputs` 生成 AI 风险报告并投递到指定部门对话框
+- 执行型智能体本轮继续按用户新口径重构：执行目标当前改为同级 `department_chat / department_table / feishu / email / mcp` 体系，前端面板收口为“单 execution 节点 = 一个主目标”；若要同时发 chat 与写表，应在 `decision_agent` 后通过 `parallel` 并列多个 `execution_agent`
+- 运行时本轮已补 execution 内部审批挂起恢复：`approval_required / approval_mode` 不再只是前端摆设，而是可以让当前 execution 节点在执行前进入审批等待，审批通过后继续执行该节点
+- `parallel` 节点本轮已从空壳推进到最小分支调度，可开始承接 `decision -> parallel -> 多 execution_agent` 的执行主链
+- 业务表格区被动触发本轮已按真实业务口径修正：不再按当前登录用户部门筛 workflow，而是扫描所有 active workflow 按感知配置匹配；命中后使用 workflow 自身 `owner_dept_id` 启动 execution，并将结果继续回到该 workflow 所属部门对话框
+- 对话工作台本轮已补两个收尾问题：`ChatMessageResponse` 当前会稳定返回 `created_at`，`ChatWindow.vue` 消息头已显示时间；同时 CEO 在聚焦具体部门时，“发送消息 / 从 chat 启动 workflow” 已统一走 `include_all + dept_id` scope 链，不再在写操作上报 404
+- 前端认证本轮已增加 401 自动失效处理：bearer 过期或无效时会清空本地登录态并自动跳回 `/login`，不再把未授权状态伪装成“页面空列表”
 
 ## 进行中模块
 - 感知型智能体详细设计（数据库实时感知优先）
 - 决策型智能体详细设计（三种决策模式）
 - 执行型智能体详细设计（对话审批、结果回传、部门表格执行对象、跨部门结果投递）
+- 业务表格区对接 Go 正式 records API 后的被动触发适配与事件桥收口
+- 执行型第三方目标 executor 详细实现（feishu / email / mcp）
+- `parallel` 控制节点完整 fork/join 语义与更强分支恢复能力
 - 对话型智能体详细设计（部门化路由、workflow 目录、选流与触发主链）
 - 对话型智能体详细设计（部门对话框消息回流、审批与执行结果在消息流中的呈现细化）
+- 执行型 chat-only / result_template / failure_delivery 细节当前已落到运行态与配置面板，但失败态模板与更多第三方目标（feishu/email/mcp）仍待继续扩展
 - 监控型智能体详细设计（独立监控工作台、非画布节点）
 - 独立 Mock 业务库与临时业务表格测试工作台详细设计
 - 控制节点详细设计（定义先行，开发后置）
@@ -110,6 +128,11 @@
 - workflow 历史弹窗的信息密度已进一步提升，但当前仍以单条摘要为主；若后续要支持复杂多节点执行结果逐项展开，可能需要继续拆明细弹层或折叠区
 - 决策型 llm 节点当前仍可能耗时 10~20 秒才进入 execution，这属于真实网关延迟而非“停死”；当前画布与 execution 查询应继续以 `running -> decision -> execution -> finished` 的渐进过程解释给配置员
 - 感知来源元数据当前已新增 `dayan_mock_records` 选项，用于在制作区明确表示“业务表格区临时测试源”；但为兼容旧流程，运行时仍保留 `erp_prod` 与 `dayan_mock_records` 的双向兼容判断
+- 事件触发型流程当前即使不是从 chat 发起，只要执行节点选择“结果回传 = 对话区”，也能把 finished / failed 等 execution 结果投递到部门对话区；当前默认投递到“当前用户 + 目标部门”的最新主会话
+- CEO 当前可以查看全部门会话、跨部门 workflow 目录与审批待办，也可以读取指定部门会话消息；但“全部门总览”仍属于同一路由内的 scope 切换，不是独立的 CEO 专属新页面
+- 这套登录模型目前仍是“静态原型账号 + 签名 token”，还不是企业级用户表 / 密码哈希 / 刷新 token / SSO；但已经从“纯 header 模拟”升级为真正的认证上下文
+- 当前 `workflow canvas` / `chat workbench` / `execution stream` 都已进入 bearer 认证口径；若后续再出现 404，优先排查旧前端页面缓存或旧后端实例未重启，而不是先怀疑 CEO 单部门 scope 逻辑
+- 当前对话区若出现“时间不显示 / CEO 写操作 404”，应优先排查是否仍在使用旧 bundle 或旧后端实例，而不是先怀疑消息模型或 session 数据本身缺失
 
 ## 未开始模块
 - 感知型智能体 Go 事件接入实现
@@ -136,6 +159,8 @@
 - 数据库实时感知与未来 IoT/Webhook 扩展需要统一抽象，避免后期重构
 - 决策型三模式配置差异较大，需要避免前端面板过于复杂
 - 执行型“手动目标 / AI 选择目标”与审批逻辑耦合，需避免前端面板过重
+- 当前 `parallel` 节点虽已具备最小分支调度，但仍偏 MVP：若后续引入复杂 join、分支失败补偿或跨分支审批，需要继续升级运行态状态模型
+- 业务表格被动触发当前已改为跨部门扫描 workflow；后续若 workflow 数量显著增加，需要补订阅索引/缓存，避免每次 records 变更都全量扫描 active workflow
 - 部门表格按部门路由时，若目标注册与权限边界不清，容易出现跨部门误写入
 - 部门表格字段映射若缺少幂等键与必填校验，容易重复插入或写入脏数据
 - 对话型 workflow 路由若过度依赖自然语言匹配，容易误选 workflow
@@ -145,26 +170,29 @@
 - 控制节点若定义不统一，后续 execution_dag 与前端配置可能分裂
 - 前端构建已通过，但当前打包体积较大，后续需做代码分割优化
 - `include_all`、`dept_id`、`owner_dept_id` 当前仍偏演示期口径，若不补后端权限闸，进入真实多部门联调时会出现跨部门可见性风险
-- `result_target_dept_id` 当前仅落到配置和执行元数据，尚未真正接到 chat 回传部门决策，容易让配置员误以为跨部门结果投递已生效
+- chat-only 路径当前已打通“决策结果 -> 对话框风险报告”，但失败态模板、富文本卡片和多消息分发仍是后续扩展点
 - workflow 执行历史当前按 100 条硬限制返回且无分页元信息，后续若历史量增大会影响可用性与解释性
 - 画布运行态高亮当前依赖 `execution_runs.current_node` 的逐步提交；若后续执行链切到独立 worker / 队列消费，需要同步维护等价的节点状态推送口径，避免高亮重新退化为终态展示
 
 ## 下一步
 - 为 `include_all / dept_id / owner_dept_id` 增加后端权限闸，收口 workflow 查看区与执行历史查询的跨部门可见性
-- 将 `result_target_dept_id` 真正接入对话结果回传链路，完成“执行结果投递到指定部门对话框”的闭环
+- 继续收口 `include_all / dept_id / owner_dept_id` 的后端权限闸，重点放在 workflow 查看区、执行历史、records 被动触发的跨部门可见性与组织级共享会话边界
+- 基于已落地的 `result_target_dept_id + result_template + chat_delivery` 口径，继续扩展失败态报告、结构化卡片与更多执行目标（feishu/email/mcp）
+- 继续把 `parallel` 节点补成更完整的并行控制节点，并让画布侧显式暴露 `parallel` 入口与 join 口径
+- 为业务表格被动触发补更明确的运行日志/命中解释，方便直接看出是“未命中条件”还是“无发布版”还是“执行启动失败”
 - 为 workflow 执行历史接口补分页或至少显式截断元信息，并补前端请求竞态保护
 - 清理本机默认开发端口 8000 的异常旧监听，恢复“代码与 HTTP 行为一致”的单实例环境
 - 继续推进 `sensor_event_inbox / sensor_subscriptions` 持久化订阅链，以及 `sensor-metadata` 向真实 Go/数据库元数据来源收口
 - 补齐 `department_table` 的真实 route registry、权限/幂等校验、审批恢复后单次写入验证与契约测试
 - 继续推进对话型智能体：候选 workflow 歧义消解、参数补齐、审批恢复卡片与消息流结构化结果展示
 - 准备 M5 收口前置项：监控 incident 模型、执行列表/异常统计、以及关键 execution 主链的契约/集成测试
-- 在已补 `.env.local/.env` 读取后，用真实 Gemini 中转配置重新验证 ChatWorkbench 的 ask 路径，确认不再落入 `LLM_NOT_CONFIGURED` fallback
-- 在 8000 旧监听彻底清理后，把前端默认代理目标重新收回单实例开发口径，避免每次联调都依赖 `VITE_API_TARGET`
 - 继续观察 workflow 执行历史里“多节点、多次写入”的展示需求；若单条 history item 同时包含多个 tool output，后续需要从“首条结果摘要”升级为“多结果列表”
-- 若后续仍出现“status 已 finished 但 history/tool_outputs 为空”，优先排查是否存在未重启后端实例吃到旧代码，而不是先怀疑 workflow 配置本身
 - 后续若要彻底去掉兼容分支，应统一 `sensor_metadata.py` 与 RecordsWorkbench 真实发出的 `source_system` 命名，不再让 `erp_prod` 与 `dayan_mock_records` 双轨并存
+- 后续若要把 event workflow 的结果投递给“全体部门成员共享会话”而不是“当前用户私有主会话”，还需要继续升级 chat session 模型与查询规则
+- 当前 CEO 总览仍是“当前用户视角的跨部门读取”，不是组织级共享会话模型；若要做到真正按公司账号体系登录并让同部门多人共享统一主会话，还需继续升级 chat_sessions 的建模方式
+- 当前 auth token 使用应用级签名方案，适合原型与内网演示；若要进入真实环境，后续应替换为正式鉴权体系，并把 chat/workflow/execution 的所有权限规则统一挂到同一认证源上
 
 ## 文档同步状态
-- 本轮已重点复核并再次同步：`progress-tracker.md`（补 workflow 历史结果增强、relay 联调状态与 mock inject/runtime 修复事实）、`frontend-code-structure.md`（补执行历史结果展示口径）、`python-service-api.md`（补 workflow history 新增结果字段与 mock inject 持久化规则）、`python-environment-config.md`（补 relay 请求路径切换与前端代理目标切换）、`third-party-dependencies.md`（补 OpenAI-compatible relay Chat/Responses 口径）、`change-log.md`（补本轮实现留痕）
-- 本轮已重点复核并再次同步：`progress-tracker.md`（补业务表格区触发兼容修复）、`frontend-code-structure.md`（补表格区触发正式 ERP 风格流程的兼容口径）、`python-service-api.md`（补表格区 source_system 兼容规则）、`python-environment-config.md`（补 relay 请求路径切换与前端代理目标切换）、`third-party-dependencies.md`（补 OpenAI-compatible relay Chat/Responses 口径）、`change-log.md`（补本轮实现留痕）
+- 本轮已重点复核并再次同步：`frontend-code-structure.md`（补 ChatWindow 时间显示与 CEO 写操作 scope 口径）、`python-service-api.md`（补 chat send/start 的 `include_all + dept_id` scope 与消息 `created_at` 返回）、`implementation-plan.md`（补当前收尾优先级）、`progress-tracker.md`（清理已完成的下一步项）、`change-log.md`（补本轮收尾同步留痕）
+- 本轮已重点复核并再次同步：`workflow-dsl.md`（补 execution_agent chat-only / result_template 口径）、`langgraph-runtime.md`（补 execution_agent chat-delivery runtime 行为）、`frontend-code-structure.md`（补执行型面板 chat-only 交互）、`progress-tracker.md`（补当前完成状态）、`change-log.md`（补本轮实现留痕）
 - 其余已在前几轮同步过且本轮未发生事实变化的 references，本轮不再重复改写
