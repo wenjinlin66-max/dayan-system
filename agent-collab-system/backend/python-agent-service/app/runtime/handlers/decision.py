@@ -87,15 +87,17 @@ class DecisionNodeHandler:
         return {
             "decision_mode": "rule",
             "decision_summary": f"{node.name} 根据规则集 {str(node.config.get('rule_set_ref') or 'default_rule_set')} 生成执行建议",
-            "decision_payload": {
-                severity_field: severity,
-                "target_item_id": target_item,
-                "current_stock": current_stock,
-                "safety_limit": safety_limit,
-                "gap": gap,
-                "recommended_quantity": recommended_quantity,
-                "rule_set_ref": str(node.config.get("rule_set_ref") or "default_rule_set"),
-            },
+            "decision_payload": DecisionNodeHandler._build_standard_decision_payload(
+                {
+                    severity_field: severity,
+                    "target_item_id": target_item,
+                    "current_stock": current_stock,
+                    "safety_limit": safety_limit,
+                    "gap": gap,
+                    "recommended_quantity": recommended_quantity,
+                    "rule_set_ref": str(node.config.get("rule_set_ref") or "default_rule_set"),
+                }
+            ),
             "risk_level": severity if severity in {"low", "medium"} else "high",
             "recommended_actions": [
                 {
@@ -153,19 +155,21 @@ class DecisionNodeHandler:
         return {
             "decision_mode": "model",
             "decision_summary": f"{node.name} 基于 {model_ref} 完成 {optimization_goal} 优化决策",
-            "decision_payload": {
-                "target_item_id": target_item,
-                "model_type": model_type,
-                "model_ref": model_ref,
-                "optimization_goal": optimization_goal,
-                "constraint_count": len(constraints),
-                "current_stock": current_stock,
-                "safety_limit": safety_limit,
-                "demand_pressure": round(demand_pressure, 3),
-                "recommended_quantity": recommended_quantity,
-                "best_action": best_action,
-                "action_scores": action_scores,
-            },
+            "decision_payload": DecisionNodeHandler._build_standard_decision_payload(
+                {
+                    "target_item_id": target_item,
+                    "model_type": model_type,
+                    "model_ref": model_ref,
+                    "optimization_goal": optimization_goal,
+                    "constraint_count": len(constraints),
+                    "current_stock": current_stock,
+                    "safety_limit": safety_limit,
+                    "demand_pressure": round(demand_pressure, 3),
+                    "recommended_quantity": recommended_quantity,
+                    "best_action": best_action,
+                    "action_scores": action_scores,
+                }
+            ),
             "risk_level": risk_level,
             "recommended_actions": [
                 {
@@ -300,6 +304,7 @@ class DecisionNodeHandler:
                     "你是大衍系统中的决策型智能体。"
                     "请基于输入、知识摘要和历史摘要输出严格 JSON 对象，不要输出 Markdown。"
                     "JSON 必须包含 decision_summary、decision_payload、risk_level、recommended_actions、explanation、citations。"
+                    "decision_payload 必须稳定包含 chat_report 与 table_write 两个子对象，供不同执行型节点消费。"
                     "risk_level 只能是 low、medium、high。"
                 ),
             },
@@ -321,7 +326,8 @@ class DecisionNodeHandler:
                     f"问题/事件：{query}\n"
                     f"当前输入：{payload}\n"
                     "请给出结构化决策，并确保 recommended_actions 为数组，每项至少包含 action_type 与 params。"
-                    "decision_payload 中请尽量给出 severity、target_item_id、recommended_quantity、next_step、decision_basis。"
+                    "decision_payload 中必须给出 target_item_id、recommended_quantity、target_dept_id、chat_report、table_write。"
+                    "其中 chat_report 至少包含 title、content、audience；table_write 至少包含 item_id、current_stock、safety_limit、recommended_quantity、status。"
                 ),
             },
         ]
@@ -502,6 +508,90 @@ class DecisionNodeHandler:
                 "severity": severity,
             }
         )
+        return DecisionNodeHandler._build_standard_decision_payload(normalized)
+
+    @staticmethod
+    def _build_standard_decision_payload(payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        normalized = dict(payload)
+        target_item_id = DecisionNodeHandler._coalesce_meaningful_value(normalized.get("target_item_id"), default="unknown-item")
+        current_stock = normalized.get("current_stock")
+        safety_limit = normalized.get("safety_limit")
+        recommended_quantity = normalized.get("recommended_quantity") if normalized.get("recommended_quantity") is not None else 20
+        target_dept_id = DecisionNodeHandler._coalesce_meaningful_value(
+            normalized.get("target_dept_id"),
+            normalized.get("dept_id"),
+            default="production",
+        )
+        warehouse_id = DecisionNodeHandler._coalesce_meaningful_value(
+            normalized.get("target_warehouse_id"),
+            normalized.get("warehouse_id"),
+        )
+        risk_level = DecisionNodeHandler._coalesce_meaningful_value(
+            normalized.get("risk_level"),
+            normalized.get("severity"),
+            default="medium",
+        )
+
+        raw_chat_report = normalized.get("chat_report") if isinstance(normalized.get("chat_report"), dict) else {}
+        raw_table_write = normalized.get("table_write") if isinstance(normalized.get("table_write"), dict) else {}
+
+        chat_report: dict[str, JsonValue] = {
+            "title": DecisionNodeHandler._coalesce_meaningful_value(
+                cast(dict[str, JsonValue], raw_chat_report).get("title") if isinstance(raw_chat_report, dict) else None,
+                default="库存风险预警",
+            ),
+            "content": DecisionNodeHandler._coalesce_meaningful_value(
+                cast(dict[str, JsonValue], raw_chat_report).get("content") if isinstance(raw_chat_report, dict) else None,
+                normalized.get("decision_summary"),
+                default="检测到库存风险，请及时关注。",
+            ),
+            "audience": DecisionNodeHandler._coalesce_meaningful_value(
+                cast(dict[str, JsonValue], raw_chat_report).get("audience") if isinstance(raw_chat_report, dict) else None,
+                target_dept_id,
+                default="production",
+            ),
+        }
+
+        table_write: dict[str, JsonValue] = {
+            "item_id": DecisionNodeHandler._coalesce_meaningful_value(
+                cast(dict[str, JsonValue], raw_table_write).get("item_id") if isinstance(raw_table_write, dict) else None,
+                target_item_id,
+                default="unknown-item",
+            ),
+            "warehouse_id": DecisionNodeHandler._coalesce_meaningful_value(
+                cast(dict[str, JsonValue], raw_table_write).get("warehouse_id") if isinstance(raw_table_write, dict) else None,
+                warehouse_id,
+            ),
+            "current_stock": DecisionNodeHandler._coalesce_meaningful_value(
+                cast(dict[str, JsonValue], raw_table_write).get("current_stock") if isinstance(raw_table_write, dict) else None,
+                current_stock,
+            ),
+            "safety_limit": DecisionNodeHandler._coalesce_meaningful_value(
+                cast(dict[str, JsonValue], raw_table_write).get("safety_limit") if isinstance(raw_table_write, dict) else None,
+                safety_limit,
+            ),
+            "recommended_quantity": DecisionNodeHandler._coalesce_meaningful_value(
+                cast(dict[str, JsonValue], raw_table_write).get("recommended_quantity") if isinstance(raw_table_write, dict) else None,
+                recommended_quantity,
+                default=20,
+            ),
+            "status": DecisionNodeHandler._coalesce_meaningful_value(
+                cast(dict[str, JsonValue], raw_table_write).get("status") if isinstance(raw_table_write, dict) else None,
+                default="待处理",
+            ),
+        }
+
+        normalized.update(
+            {
+                "target_item_id": target_item_id,
+                "recommended_quantity": recommended_quantity,
+                "target_dept_id": target_dept_id,
+                "target_warehouse_id": warehouse_id,
+                "risk_level": risk_level,
+                "chat_report": chat_report,
+                "table_write": table_write,
+            }
+        )
         return normalized
 
     @staticmethod
@@ -540,10 +630,18 @@ class DecisionNodeHandler:
 
         return [
             {
-                "action_type": "llm_generated_recommendation",
+                "action_type": "send_risk_report",
+                "params": {
+                    "target_dept_id": normalized_payload.get("target_dept_id"),
+                    "report_key": "chat_report",
+                },
+            },
+            {
+                "action_type": "update_replenishment_table",
                 "params": {
                     "item_id": normalized_payload.get("target_item_id"),
                     "quantity": normalized_payload.get("recommended_quantity"),
+                    "payload_key": "table_write",
                 },
-            }
+            },
         ]

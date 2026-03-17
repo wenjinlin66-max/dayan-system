@@ -19,8 +19,8 @@
             <el-option v-for="item in modelTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
           <el-input v-if="decisionMode === 'model'" v-model="optimizationGoal" placeholder="优化目标，如 balance_cost_and_efficiency" />
-          <el-input v-if="decisionMode === 'llm'" v-model="promptTemplate" placeholder="提示模板，如 根据低库存事件生成补货建议" />
-          <el-input v-if="decisionMode === 'llm'" v-model="outputTemplate" placeholder="输出模板，如 decision.result.ai_plan.v1" />
+          <el-input v-if="decisionMode === 'llm'" v-model="promptTemplate" placeholder="提示模板，如 根据低库存事件生成可供 chat/table 执行的结构化风险方案" />
+          <el-input v-if="decisionMode === 'llm'" v-model="outputTemplate" placeholder="输出模板，如 decision.result.execution_bundle.v1" />
         </div>
       </div>
     </section>
@@ -65,7 +65,7 @@
       <div class="grid gap-4 md:grid-cols-2">
         <div class="space-y-2">
           <div class="text-sm font-medium text-slate-700">约束列表</div>
-          <el-input v-model="constraintsText" type="textarea" :rows="5" placeholder="库存不可低于 0&#10;优先保障关键物料" />
+          <el-input v-model="constraintsText" type="textarea" :rows="5" placeholder="库存不可低于 0&#10;优先保障关键物料&#10;输出必须稳定包含 chat_report 与 table_write" />
         </div>
         <div class="space-y-2">
           <div class="text-sm font-medium text-slate-700">知识范围</div>
