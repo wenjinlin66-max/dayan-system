@@ -20,6 +20,8 @@ class ChatMessageCreateRequest(BaseModel):
 class ChatMessageResponse(BaseModel):
     message_id: str
     session_id: str
+    dept_id: str | None = None
+    created_at: str | None = None
     role: str
     content: str | None = None
     route_type: str | None = None

@@ -42,31 +42,29 @@ async def create_session(
 
 @router.get("/sessions", response_model=list[ChatSessionResponse])
 async def list_sessions(
+    dept_id: str | None = Query(default=None),
+    include_all: bool = Query(default=False),
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[ChatSessionResponse]:
-    repository = ChatRepository(session)
-    items = await repository.list_sessions(context.dept_id, context.user_id)
-    return [
-        ChatSessionResponse(
-            session_id=item.id,
-            title=item.title or "新会话",
-            dept_id=item.dept_id,
-            last_message_at=item.last_message_at.isoformat() if item.last_message_at else None,
-        )
-        for item in items
-    ]
+    service = build_service(session)
+    scoped_all = include_all and "ceo" in context.roles
+    scope_dept_id = dept_id if scoped_all else context.dept_id
+    return await service.list_sessions_in_scope(dept_id=scope_dept_id, user_id=context.user_id, include_all=scoped_all)
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_session(
     session_id: str,
+    dept_id: str | None = Query(default=None),
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> None:
     service = build_service(session)
     try:
-        await service.delete_session(session_id, dept_id=context.dept_id, user_id=context.user_id)
+        scoped_all = "ceo" in context.roles
+        scope_dept_id = dept_id if scoped_all else context.dept_id
+        await service.delete_session_in_scope(session_id, dept_id=scope_dept_id, user_id=context.user_id, include_all=scoped_all)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -75,17 +73,22 @@ async def delete_session(
 async def send_message(
     session_id: str,
     payload: ChatMessageCreateRequest,
+    dept_id: str | None = Query(default=None),
+    include_all: bool = Query(default=False),
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ChatMessageResponse:
     service = build_service(session)
     try:
-        return await service.append_message_and_route(
+        scoped_all = include_all and "ceo" in context.roles
+        scope_dept_id = dept_id if scoped_all else context.dept_id
+        return await service.append_message_and_route_in_scope(
             session_id,
             payload,
-            dept_id=context.dept_id,
+            dept_id=scope_dept_id,
             user_id=context.user_id,
             roles=context.roles,
+            include_all=scoped_all,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -94,12 +97,15 @@ async def send_message(
 @router.get("/sessions/{session_id}/messages", response_model=ChatMessageListResponse)
 async def list_messages(
     session_id: str,
+    dept_id: str | None = Query(default=None),
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ChatMessageListResponse:
     service = build_service(session)
     try:
-        return await service.list_messages_for_actor(session_id, dept_id=context.dept_id, user_id=context.user_id)
+        scoped_all = "ceo" in context.roles
+        scope_dept_id = dept_id if scoped_all else context.dept_id
+        return await service.list_messages_for_scope(session_id, dept_id=scope_dept_id, user_id=context.user_id, include_all=scoped_all)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -107,11 +113,15 @@ async def list_messages(
 @router.get("/workflows/catalog", response_model=WorkflowCatalogResponse)
 async def get_workflow_catalog(
     category: str | None = Query(default=None),
+    dept_id: str | None = Query(default=None),
+    include_all: bool = Query(default=False),
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> WorkflowCatalogResponse:
     service = build_service(session)
-    return await service.list_catalog(dept_id=context.dept_id, category=category)
+    scoped_all = include_all and "ceo" in context.roles
+    scope_dept_id = dept_id if scoped_all else context.dept_id
+    return await service.list_catalog(dept_id=scope_dept_id, category=category, include_all=scoped_all)
 
 
 @router.post("/route", response_model=ChatRouteResponse)
@@ -129,18 +139,23 @@ async def start_workflow_from_chat(
     session_id: str,
     workflow_id: str,
     payload: ChatWorkflowStartRequest,
+    dept_id: str | None = Query(default=None),
+    include_all: bool = Query(default=False),
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ChatMessageResponse:
     service = build_service(session)
     try:
-        return await service.start_workflow_from_selection(
+        scoped_all = include_all and "ceo" in context.roles
+        scope_dept_id = dept_id if scoped_all else context.dept_id
+        return await service.start_workflow_from_selection_in_scope(
             session_id,
             workflow_id,
             payload,
-            dept_id=context.dept_id,
+            dept_id=scope_dept_id,
             user_id=context.user_id,
             roles=context.roles,
+            include_all=scoped_all,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

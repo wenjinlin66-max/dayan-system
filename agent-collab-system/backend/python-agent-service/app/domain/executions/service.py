@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import cast
 from uuid import uuid4
 
+from app.db.models.chat import ChatSession
 from app.db.models.execution import ExecutionCheckpoint, ExecutionRun
 from app.domain.approvals.repository import ApprovalRepository
 from app.domain.chat.repository import ChatRepository
@@ -20,6 +21,7 @@ from app.runtime.handlers.condition import ConditionNodeHandler
 from app.runtime.handlers.decision import DecisionNodeHandler
 from app.runtime.handlers.dialog import DialogNodeHandler
 from app.runtime.handlers.execution import ExecutionNodeHandler
+from app.runtime.handlers.parallel import ParallelNodeHandler
 from app.runtime.handlers.sensor import SensorNodeHandler
 from app.runtime.models import JsonValue, RuntimeState
 from app.schemas.execution import ExecutionStartRequest, ExecutionStatusResponse, WorkflowExecutionHistoryItem, WorkflowExecutionHistoryResponse
@@ -158,11 +160,13 @@ class ExecutionService:
                 if not paused:
                     await self._append_execution_message(
                         session_id=session_id,
-                        dept_id=run.dept_id,
+                        dept_id=self._resolve_result_chat_dept_id(run, runtime_state),
+                        user_id=str(run.started_by or "system"),
                         execution_id=execution_id,
                         workflow_id=run.workflow_id,
                         status=status_value,
                         current_node=runtime_state.current_node,
+                        runtime_state=runtime_state,
                     )
         except ValueError as exc:
             await self.execution_repository.update_run(
@@ -175,12 +179,14 @@ class ExecutionService:
             )
             await self._append_execution_message(
                 session_id=session_id,
-                dept_id=run.dept_id,
+                dept_id=self._resolve_result_chat_dept_id(run, runtime_state),
+                user_id=str(run.started_by or "system"),
                 execution_id=execution_id,
                 workflow_id=run.workflow_id,
                 status="failed",
                 current_node=runtime_state.current_node,
                 error_summary=str(exc),
+                runtime_state=runtime_state,
             )
         except Exception as exc:
             await self.execution_repository.update_run(
@@ -193,12 +199,14 @@ class ExecutionService:
             )
             await self._append_execution_message(
                 session_id=session_id,
-                dept_id=run.dept_id,
+                dept_id=self._resolve_result_chat_dept_id(run, runtime_state),
+                user_id=str(run.started_by or "system"),
                 execution_id=execution_id,
                 workflow_id=run.workflow_id,
                 status="failed",
                 current_node=runtime_state.current_node,
                 error_summary=str(exc),
+                runtime_state=runtime_state,
             )
         await self.execution_repository.session.commit()
         latest_run = await self.execution_repository.get_run(execution_id)
@@ -215,6 +223,16 @@ class ExecutionService:
     async def get_status_for_dept(self, execution_id: str, *, dept_id: str) -> ExecutionStatusResponse:
         run = await self.execution_repository.get_run(execution_id)
         if run is None or run.dept_id != dept_id:
+            raise ValueError("EXECUTION_NOT_FOUND")
+        return self._to_response(run)
+
+    async def get_status_in_scope(self, execution_id: str, *, dept_id: str | None, include_all: bool) -> ExecutionStatusResponse:
+        run = await self.execution_repository.get_run(execution_id)
+        if run is None:
+            raise ValueError("EXECUTION_NOT_FOUND")
+        if not include_all and run.dept_id != dept_id:
+            raise ValueError("EXECUTION_NOT_FOUND")
+        if include_all and dept_id and run.dept_id != dept_id:
             raise ValueError("EXECUTION_NOT_FOUND")
         return self._to_response(run)
 
@@ -261,11 +279,13 @@ class ExecutionService:
             await self._append_execution_message(
                 session_id=self._extract_session_id(run),
                 dept_id=run.dept_id,
+                user_id=str(run.started_by or "system"),
                 execution_id=execution_id,
                 workflow_id=run.workflow_id,
                 status="cancelled",
                 current_node=run.current_node,
                 error_summary=comment or "审批驳回",
+                runtime_state=None,
             )
             await self.execution_repository.session.commit()
             updated = await self.execution_repository.get_run(execution_id)
@@ -312,11 +332,13 @@ class ExecutionService:
         if not paused:
             await self._append_execution_message(
                 session_id=self._extract_session_id(run),
-                dept_id=run.dept_id,
+                dept_id=self._resolve_result_chat_dept_id(run, runtime_state),
+                user_id=str(run.started_by or "system"),
                 execution_id=execution_id,
                 workflow_id=run.workflow_id,
                 status="finished",
                 current_node=runtime_state.current_node,
+                runtime_state=runtime_state,
             )
         await self.execution_repository.session.commit()
         updated = await self.execution_repository.get_run(execution_id)
@@ -330,7 +352,11 @@ class ExecutionService:
         current_node_id = start_node or graph.entrypoint
         visited = 0
 
-        while current_node_id:
+        while True:
+            if not current_node_id:
+                current_node_id = self._pop_pending_parallel_node(state)
+                if not current_node_id:
+                    break
             visited += 1
             if visited > max(len(graph.nodes) * 2, 20):
                 raise ValueError("EXECUTION_GRAPH_GUARD_TRIGGERED")
@@ -396,10 +422,20 @@ class ExecutionService:
                 "sensor_agent": SensorNodeHandler(),
                 "decision_agent": DecisionNodeHandler(llm_client),
                 "condition": ConditionNodeHandler(),
+                "parallel": ParallelNodeHandler(),
                 "approval": ApprovalNodeHandler(approval_repository),
-                "execution_agent": ExecutionNodeHandler(tool_registry.get_department_table_writer(), llm_client),
+                "execution_agent": ExecutionNodeHandler(tool_registry.get_department_table_writer(), llm_client, approval_repository),
             }
         return NodeDispatcher(handlers)
+
+    @staticmethod
+    def _pop_pending_parallel_node(state: RuntimeState) -> str | None:
+        raw_pending = state.context.get("parallel_pending_nodes")
+        if not isinstance(raw_pending, list) or not raw_pending:
+            return None
+        next_node = raw_pending.pop(0)
+        state.context["parallel_pending_nodes"] = raw_pending
+        return next_node if isinstance(next_node, str) and next_node else None
 
     async def _get_workflow_version(self, workflow_id: str, version: int, mode: str):
         resolved = await self.workflow_repository.get_version(workflow_id, version)
@@ -509,22 +545,33 @@ class ExecutionService:
         *,
         session_id: str | None,
         dept_id: str,
+        user_id: str,
         execution_id: str,
         workflow_id: str,
         status: str,
         current_node: str | None,
         error_summary: str | None = None,
+        runtime_state: RuntimeState | None = None,
     ) -> None:
-        if not session_id:
-            return
         repository = ChatRepository(self.execution_repository.session)
-        content = (
-            f"部门对话框收到执行结果：workflow={workflow_id}，status={status}，当前节点={current_node or '-'}。"
-            if not error_summary
-            else f"部门对话框收到执行结果：workflow={workflow_id}，status={status}，原因={error_summary}。"
-        )
-        await repository.append_assistant_message(
+        effective_session_id = await self._resolve_result_session_id(
+            repository,
             session_id=session_id,
+            dept_id=dept_id,
+            user_id=user_id,
+        )
+        if not effective_session_id:
+            return
+        content = self._build_execution_message_content(
+            workflow_id=workflow_id,
+            status=status,
+            current_node=current_node,
+            error_summary=error_summary,
+            runtime_state=runtime_state,
+        )
+        chat_delivery = self._extract_chat_delivery(runtime_state)
+        _ = await repository.append_assistant_message(
+            session_id=effective_session_id,
             dept_id=dept_id,
             content=content,
             payload={
@@ -534,9 +581,102 @@ class ExecutionService:
                 "status": status,
                 "current_node": current_node,
                 "error_summary": error_summary,
+                "chat_delivery": chat_delivery,
             },
             related_execution_id=execution_id,
         )
+
+    async def _resolve_result_session_id(
+        self,
+        repository: ChatRepository,
+        *,
+        session_id: str | None,
+        dept_id: str,
+        user_id: str,
+    ) -> str | None:
+        if isinstance(session_id, str) and session_id:
+            session = await repository.get_session(session_id)
+            if session is not None and session.dept_id == dept_id:
+                return session.id
+        return await self._ensure_department_chat_session(repository, dept_id=dept_id, user_id=user_id)
+
+    @staticmethod
+    def _build_execution_message_content(
+        *,
+        workflow_id: str,
+        status: str,
+        current_node: str | None,
+        error_summary: str | None,
+        runtime_state: RuntimeState | None,
+    ) -> str:
+        chat_delivery = ExecutionService._extract_chat_delivery(runtime_state)
+        content = chat_delivery.get("content") if isinstance(chat_delivery, dict) else None
+        if isinstance(content, str) and content.strip():
+            return content
+        return (
+            f"部门对话框收到执行结果：workflow={workflow_id}，status={status}，当前节点={current_node or '-'}。"
+            if not error_summary
+            else f"部门对话框收到执行结果：workflow={workflow_id}，status={status}，原因={error_summary}。"
+        )
+
+    @staticmethod
+    def _extract_chat_delivery(runtime_state: RuntimeState | None) -> dict[str, object] | None:
+        if runtime_state is None or not isinstance(runtime_state.tool_outputs, dict):
+            return None
+        latest_output = ExecutionService._latest_tool_output(runtime_state.tool_outputs)
+        if isinstance(latest_output, dict):
+            chat_delivery = latest_output.get("chat_delivery")
+            if isinstance(chat_delivery, dict):
+                return cast(dict[str, object], chat_delivery)
+        return None
+
+    @staticmethod
+    def _latest_tool_output(tool_outputs: dict[str, dict[str, object]] | dict[str, object]) -> dict[str, object] | None:
+        if not isinstance(tool_outputs, dict) or not tool_outputs:
+            return None
+        latest_key = next(reversed(tool_outputs))
+        latest = tool_outputs.get(latest_key)
+        return cast(dict[str, object], latest) if isinstance(latest, dict) else None
+
+    async def _ensure_department_chat_session(
+        self,
+        repository: ChatRepository,
+        *,
+        dept_id: str,
+        user_id: str,
+    ) -> str | None:
+        sessions = await repository.list_sessions(dept_id, user_id)
+        if sessions:
+            return sessions[0].id
+        session = ChatSession(
+            id=f"chat_{uuid4().hex[:12]}",
+            dept_id=dept_id,
+            user_id=user_id,
+            title="当前部门主对话框",
+            status="active",
+            last_message_at=datetime.now(timezone.utc),
+        )
+        _ = await repository.create_session(session)
+        return session.id
+
+    @staticmethod
+    def _resolve_result_chat_dept_id(run: ExecutionRun, state: RuntimeState) -> str:
+        tool_outputs = state.tool_outputs if isinstance(state.tool_outputs, dict) else {}
+        if tool_outputs:
+            latest_tool = ExecutionService._latest_tool_output(tool_outputs)
+            if isinstance(latest_tool, dict):
+                chat_delivery = latest_tool.get("chat_delivery") if isinstance(latest_tool.get("chat_delivery"), dict) else {}
+                chat_target_dept_id = chat_delivery.get("target_dept_id") if isinstance(chat_delivery, dict) else None
+                if isinstance(chat_target_dept_id, str) and chat_target_dept_id:
+                    return chat_target_dept_id
+                request_payload = latest_tool.get("request_payload") if isinstance(latest_tool.get("request_payload"), dict) else {}
+                result_target_dept_id = request_payload.get("result_target_dept_id") if isinstance(request_payload, dict) else None
+                if isinstance(result_target_dept_id, str) and result_target_dept_id:
+                    return result_target_dept_id
+                request_dept_id = request_payload.get("dept_id") if isinstance(request_payload, dict) else None
+                if isinstance(request_dept_id, str) and request_dept_id:
+                    return request_dept_id
+        return run.dept_id
 
     @staticmethod
     def _to_history_item(run: ExecutionRun, workflow_name: str) -> WorkflowExecutionHistoryItem:

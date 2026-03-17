@@ -71,9 +71,22 @@ class ChatService:
             raise ValueError("CHAT_SESSION_NOT_FOUND")
         await self.repository.session.commit()
 
-    async def list_catalog(self, *, dept_id: str, category: str | None = None) -> WorkflowCatalogResponse:
-        entries = await self.repository.list_catalog(dept_id, category)
-        return WorkflowCatalogResponse(items=[self._catalog_item(entry, None) for entry in entries])
+    async def delete_session_in_scope(self, session_id: str, *, dept_id: str | None, user_id: str, include_all: bool) -> None:
+        deleted = await self.repository.delete_session_in_scope(session_id, dept_id=dept_id, user_id=user_id, include_all=include_all)
+        if not deleted:
+            raise ValueError("CHAT_SESSION_NOT_FOUND")
+        await self.repository.session.commit()
+
+    async def list_catalog(self, *, dept_id: str | None, category: str | None = None, include_all: bool = False) -> WorkflowCatalogResponse:
+        entries = await self.repository.list_catalog_in_scope(dept_id=dept_id, category=category, include_all=include_all)
+        deduped: list[WorkflowRegistry] = []
+        seen_workflow_ids: set[str] = set()
+        for entry in entries:
+            if entry.workflow_id in seen_workflow_ids:
+                continue
+            seen_workflow_ids.add(entry.workflow_id)
+            deduped.append(entry)
+        return WorkflowCatalogResponse(items=[self._catalog_item(entry, None) for entry in deduped])
 
     async def route(
         self,
@@ -105,6 +118,46 @@ class ChatService:
         session = await self.repository.get_session_for_actor(session_id, dept_id, user_id)
         if session is None:
             raise ValueError("CHAT_SESSION_NOT_FOUND")
+        return await self._append_message_and_route_for_session(
+            session,
+            payload,
+            dept_id=dept_id,
+            user_id=user_id,
+            roles=roles,
+        )
+
+    async def append_message_and_route_in_scope(
+        self,
+        session_id: str,
+        payload: ChatMessageCreateRequest,
+        *,
+        dept_id: str | None,
+        user_id: str,
+        roles: list[str],
+        include_all: bool,
+    ) -> ChatMessageResponse:
+        session = await self.repository.get_session_in_scope(session_id, dept_id=dept_id, user_id=user_id, include_all=include_all)
+        if session is None:
+            raise ValueError("CHAT_SESSION_NOT_FOUND")
+        effective_dept_id = session.dept_id
+        return await self._append_message_and_route_for_session(
+            session,
+            payload,
+            dept_id=effective_dept_id,
+            user_id=user_id,
+            roles=roles,
+        )
+
+    async def _append_message_and_route_for_session(
+        self,
+        session: ChatSession,
+        payload: ChatMessageCreateRequest,
+        *,
+        dept_id: str,
+        user_id: str,
+        roles: list[str],
+    ) -> ChatMessageResponse:
+        session_id = session.id
 
         user_message = ChatMessage(
             id=f"msg_{uuid4().hex[:12]}",
@@ -140,6 +193,8 @@ class ChatService:
         return ChatMessageResponse(
             message_id=assistant_message.id,
             session_id=session_id,
+            dept_id=assistant_message.dept_id,
+            created_at=assistant_message.created_at.isoformat() if assistant_message.created_at else None,
             role=assistant_message.role,
             content=assistant_message.content,
             route_type=decision.route_type,
@@ -155,6 +210,8 @@ class ChatService:
                 ChatMessageResponse(
                     message_id=message.id,
                     session_id=message.session_id,
+                    dept_id=message.dept_id,
+                    created_at=message.created_at.isoformat() if message.created_at else None,
                     role=message.role,
                     content=message.content,
                     route_type=cast(str | None, (message.payload or {}).get("route_type") if message.payload else None),
@@ -165,8 +222,8 @@ class ChatService:
             ],
         )
 
-    async def list_messages_for_actor(self, session_id: str, *, dept_id: str, user_id: str) -> ChatMessageListResponse:
-        session = await self.repository.get_session_for_actor(session_id, dept_id, user_id)
+    async def list_messages_for_scope(self, session_id: str, *, dept_id: str | None, user_id: str, include_all: bool) -> ChatMessageListResponse:
+        session = await self.repository.get_session_in_scope(session_id, dept_id=dept_id, user_id=user_id, include_all=include_all)
         if session is None:
             raise ValueError("CHAT_SESSION_NOT_FOUND")
         messages = await self.repository.list_messages(session_id)
@@ -176,6 +233,8 @@ class ChatService:
                 ChatMessageResponse(
                     message_id=message.id,
                     session_id=message.session_id,
+                    dept_id=message.dept_id,
+                    created_at=message.created_at.isoformat() if message.created_at else None,
                     role=message.role,
                     content=message.content,
                     route_type=cast(str | None, (message.payload or {}).get("route_type") if message.payload else None),
@@ -185,6 +244,18 @@ class ChatService:
                 for message in messages
             ],
         )
+
+    async def list_sessions_in_scope(self, *, dept_id: str | None, user_id: str, include_all: bool) -> list[ChatSessionResponse]:
+        sessions = await self.repository.list_sessions_in_scope(dept_id=dept_id, user_id=user_id, include_all=include_all)
+        return [
+            ChatSessionResponse(
+                session_id=item.id,
+                title=item.title or "新会话",
+                dept_id=item.dept_id,
+                last_message_at=item.last_message_at.isoformat() if item.last_message_at else None,
+            )
+            for item in sessions
+        ]
 
     async def start_workflow_from_selection(
         self,
@@ -199,6 +270,50 @@ class ChatService:
         session = await self.repository.get_session_for_actor(session_id, dept_id, user_id)
         if session is None:
             raise ValueError("CHAT_SESSION_NOT_FOUND")
+        return await self._start_workflow_for_session(
+            session,
+            workflow_id,
+            payload,
+            dept_id=dept_id,
+            user_id=user_id,
+            roles=roles,
+        )
+
+    async def start_workflow_from_selection_in_scope(
+        self,
+        session_id: str,
+        workflow_id: str,
+        payload: ChatWorkflowStartRequest,
+        *,
+        dept_id: str | None,
+        user_id: str,
+        roles: list[str],
+        include_all: bool,
+    ) -> ChatMessageResponse:
+        session = await self.repository.get_session_in_scope(session_id, dept_id=dept_id, user_id=user_id, include_all=include_all)
+        if session is None:
+            raise ValueError("CHAT_SESSION_NOT_FOUND")
+        effective_dept_id = session.dept_id
+        return await self._start_workflow_for_session(
+            session,
+            workflow_id,
+            payload,
+            dept_id=effective_dept_id,
+            user_id=user_id,
+            roles=roles,
+        )
+
+    async def _start_workflow_for_session(
+        self,
+        session: ChatSession,
+        workflow_id: str,
+        payload: ChatWorkflowStartRequest,
+        *,
+        dept_id: str,
+        user_id: str,
+        roles: list[str],
+    ) -> ChatMessageResponse:
+        session_id = session.id
 
         entries = await self.repository.list_catalog(dept_id)
         selected = next((entry for entry in entries if entry.workflow_id == workflow_id), None)
@@ -229,6 +344,7 @@ class ChatService:
             return ChatMessageResponse(
                 message_id=assistant_message.id,
                 session_id=session_id,
+                created_at=assistant_message.created_at.isoformat() if assistant_message.created_at else None,
                 role=assistant_message.role,
                 content=assistant_message.content,
                 route_type="command",
@@ -287,6 +403,7 @@ class ChatService:
         return ChatMessageResponse(
             message_id=assistant_message.id,
             session_id=session_id,
+            created_at=assistant_message.created_at.isoformat() if assistant_message.created_at else None,
             role=assistant_message.role,
             content=assistant_message.content,
             route_type="command",

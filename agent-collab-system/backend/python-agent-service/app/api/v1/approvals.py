@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,11 +21,15 @@ def build_service(session: AsyncSession) -> ApprovalService:
 
 @router.get("", response_model=ApprovalTaskListResponse)
 async def list_approval_tasks(
+    dept_id: str | None = Query(default=None),
+    include_all: bool = Query(default=False),
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApprovalTaskListResponse:
     service = build_service(session)
-    return await service.list_pending(context.dept_id)
+    scoped_all = include_all and "ceo" in context.roles
+    scope_dept_id = dept_id if scoped_all else context.dept_id
+    return await service.list_pending(scope_dept_id)
 
 
 @router.post("/resume", response_model=ApprovalResumeResponse)
@@ -37,7 +41,7 @@ async def resume_approval(
     service = build_service(session)
     try:
         run = await service.execution_service.execution_repository.get_run(payload.execution_id)
-        if run is None or run.dept_id != context.dept_id:
+        if run is None or ("ceo" not in context.roles and run.dept_id != context.dept_id):
             raise ValueError("APPROVAL_TASK_NOT_FOUND")
         return await service.resume(payload)
     except ValueError as exc:

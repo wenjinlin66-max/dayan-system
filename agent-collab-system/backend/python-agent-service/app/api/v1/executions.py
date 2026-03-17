@@ -3,12 +3,13 @@ import json
 from time import monotonic
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db_session, get_mock_db_session, get_request_context
 from app.core.security import RequestContext
+from app.domain.auth.token_service import token_service
 from app.db.session import get_session_factory
 from app.domain.approvals.repository import ApprovalRepository
 from app.domain.executions.repository import ExecutionRepository
@@ -93,12 +94,16 @@ async def mock_event_inject(
 @router.get("/{execution_id}", response_model=ExecutionStatusResponse)
 async def get_execution(
     execution_id: str,
+    dept_id: str | None = None,
+    include_all: bool = False,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ExecutionStatusResponse:
     service = build_service(session)
     try:
-        return await service.get_status_for_dept(execution_id, dept_id=context.dept_id)
+        scoped_all = include_all and "ceo" in context.roles
+        scope_dept_id = dept_id if scoped_all else context.dept_id
+        return await service.get_status_in_scope(execution_id, dept_id=scope_dept_id, include_all=scoped_all)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -112,7 +117,8 @@ async def get_workflow_execution_history(
 ) -> WorkflowExecutionHistoryResponse:
     service = build_service(session)
     try:
-        return await service.list_workflow_history(workflow_id, dept_id=context.dept_id, include_all=include_all)
+        scoped_all = include_all and "ceo" in context.roles
+        return await service.list_workflow_history(workflow_id, dept_id=context.dept_id, include_all=scoped_all)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -138,8 +144,21 @@ async def delete_execution(
 @router.get("/{execution_id}/stream")
 async def stream_execution(
     execution_id: str,
+    access_token: str | None = Query(default=None),
+    dept_id: str | None = Query(default=None),
+    include_all: bool = Query(default=False),
     context: RequestContext = Depends(get_request_context),
 ) -> StreamingResponse:
+    effective_context = context
+    if access_token and context.user_id in {'system', 'default'}:
+        token_payload = token_service.verify_token(access_token)
+        if token_payload is not None:
+            effective_context = RequestContext(
+                user_id=token_payload.user_id,
+                dept_id=token_payload.dept_id,
+                display_name=token_payload.display_name,
+                roles=list(token_payload.roles),
+            )
     session_factory = get_session_factory()
 
     async def event_generator():
@@ -147,7 +166,9 @@ async def stream_execution(
         while monotonic() < deadline:
             async with session_factory() as stream_session:
                 service = build_service(stream_session)
-                status_payload = await service.get_status_for_dept(execution_id, dept_id=context.dept_id)
+                scoped_all = include_all and "ceo" in effective_context.roles
+                scope_dept_id = dept_id if scoped_all else effective_context.dept_id
+                status_payload = await service.get_status_in_scope(execution_id, dept_id=scope_dept_id, include_all=scoped_all)
             yield f"event: status\ndata: {json.dumps(status_payload.model_dump(), ensure_ascii=False)}\n\n"
             if status_payload.status in {"finished", "failed", "cancelled"}:
                 break

@@ -47,7 +47,8 @@ async def list_workflows(
     session: AsyncSession = Depends(get_db_session),
 ) -> list[WorkflowResponse]:
     service = build_service(session)
-    return await service.list_workflows(dept_id=dept_id or context.dept_id, include_all=include_all)
+    scoped_all = include_all and "ceo" in context.roles
+    return await service.list_workflows(dept_id=dept_id if scoped_all else context.dept_id, include_all=scoped_all)
 
 
 @router.get("/sensor-metadata", response_model=SensorMetadataResponse)

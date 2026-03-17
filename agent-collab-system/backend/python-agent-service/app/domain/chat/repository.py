@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -44,6 +43,26 @@ class ChatRepository:
         )
         return list(result.scalars().all())
 
+    async def list_sessions_in_scope(
+        self,
+        *,
+        dept_id: str | None,
+        user_id: str,
+        include_all: bool,
+    ) -> list[ChatSession]:
+        stmt = select(ChatSession)
+        if include_all:
+          if dept_id:
+            stmt = stmt.where(ChatSession.dept_id == dept_id)
+        else:
+          stmt = stmt.where(ChatSession.user_id == user_id)
+          if dept_id:
+            stmt = stmt.where(ChatSession.dept_id == dept_id)
+        result = await self.session.execute(
+            stmt.order_by(ChatSession.last_message_at.desc().nullslast(), ChatSession.created_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def create_message(self, message: ChatMessage) -> ChatMessage:
         self.session.add(message)
         await self.session.flush()
@@ -62,6 +81,35 @@ class ChatRepository:
         _ = await self.session.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
         _ = await self.session.execute(delete(ChatSession).where(ChatSession.id == session_id))
         return True
+
+    async def delete_session_in_scope(self, session_id: str, *, dept_id: str | None, user_id: str, include_all: bool) -> bool:
+        session = await self.get_session(session_id)
+        if session is None:
+            return False
+        if not include_all:
+            if session.user_id != user_id:
+                return False
+            if dept_id and session.dept_id != dept_id:
+                return False
+        elif dept_id and session.dept_id != dept_id:
+            return False
+        _ = await self.session.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
+        _ = await self.session.execute(delete(ChatSession).where(ChatSession.id == session_id))
+        return True
+
+    async def get_session_in_scope(self, session_id: str, *, dept_id: str | None, user_id: str, include_all: bool) -> ChatSession | None:
+        session = await self.get_session(session_id)
+        if session is None:
+            return None
+        if include_all:
+            if dept_id and session.dept_id != dept_id:
+                return None
+            return session
+        if session.user_id != user_id:
+            return None
+        if dept_id and session.dept_id != dept_id:
+            return None
+        return session
 
     async def touch_session(self, session_id: str, *, last_message_at: datetime) -> None:
         _ = await self.session.execute(
@@ -98,4 +146,13 @@ class ChatRepository:
         if category and category != "all":
             stmt = stmt.where(WorkflowRegistry.category == category)
         result = await self.session.execute(stmt.order_by(WorkflowRegistry.updated_at.desc()))
+        return list(result.scalars().all())
+
+    async def list_catalog_in_scope(self, *, dept_id: str | None, category: str | None = None, include_all: bool) -> list[WorkflowRegistry]:
+        stmt = select(WorkflowRegistry).where(WorkflowRegistry.status == "active")
+        if not include_all or dept_id:
+            stmt = stmt.where(WorkflowRegistry.dept_id == dept_id)
+        if category and category != "all":
+            stmt = stmt.where(WorkflowRegistry.category == category)
+        result = await self.session.execute(stmt.order_by(WorkflowRegistry.dept_id.asc(), WorkflowRegistry.updated_at.desc()))
         return list(result.scalars().all())

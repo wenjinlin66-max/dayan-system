@@ -240,7 +240,7 @@ class WorkflowService:
             versions=[self._to_version_response(version) for version in versions],
         )
 
-    async def list_workflows(self, *, dept_id: str, include_all: bool = False) -> list[WorkflowResponse]:
+    async def list_workflows(self, *, dept_id: str | None, include_all: bool = False) -> list[WorkflowResponse]:
         workflows = await self.repository.list_workflows() if include_all else await self.repository.list_workflows_by_dept(dept_id)
         responses: list[WorkflowResponse] = []
         for workflow in workflows:
