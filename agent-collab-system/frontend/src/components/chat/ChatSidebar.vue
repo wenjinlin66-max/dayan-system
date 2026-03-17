@@ -1,15 +1,15 @@
 <template>
   <div class="rounded-[28px] border border-slate-200/80 bg-white/95 p-4 shadow-[0_20px_50px_rgba(148,163,184,0.12)]">
     <div class="mb-4 rounded-[22px] border border-sky-200 bg-[linear-gradient(135deg,#f0f7ff,#edf8ff)] px-4 py-4">
-      <div class="text-[11px] uppercase tracking-[0.22em] text-sky-700/70">当前部门对话框</div>
-      <div class="mt-2 text-lg font-semibold text-slate-950">{{ currentDeptLabel }}</div>
-      <div class="mt-1 text-xs leading-6 text-slate-600">该部门会话统一承接审批提醒、执行结果回传和本部门流程调用。</div>
-    </div>
+        <div class="text-[11px] uppercase tracking-[0.22em] text-sky-700/70">{{ chatStore.canViewAllDepartments() && chatStore.scopeMode === 'all_departments' ? 'CEO 对话总览' : '当前部门对话框' }}</div>
+        <div class="mt-2 text-lg font-semibold text-slate-950">{{ currentDeptLabel }}</div>
+        <div class="mt-1 text-xs leading-6 text-slate-600">{{ panelDescription }}</div>
+      </div>
 
     <div class="mb-4 flex items-center justify-between gap-3">
       <div>
         <div class="text-[11px] uppercase tracking-[0.22em] text-slate-500">部门会话列表</div>
-        <div class="mt-1 text-sm font-semibold text-slate-900">当前部门的历史对话框</div>
+        <div class="mt-1 text-sm font-semibold text-slate-900">{{ chatStore.canViewAllDepartments() && chatStore.scopeMode === 'all_departments' ? '跨部门历史会话' : '当前部门的历史对话框' }}</div>
       </div>
       <el-button size="small" type="primary" @click="createNewSession">新建会话</el-button>
     </div>
@@ -24,7 +24,7 @@
         <div class="flex items-start justify-between gap-3">
           <button class="min-w-0 flex-1 text-left" @click="handleSelectSession(session.session_id)">
             <div class="truncate font-medium">{{ session.title }}</div>
-            <div class="mt-1 text-xs text-slate-500">{{ session.dept_id }} · {{ session.last_message_at ? formatTime(session.last_message_at) : '刚创建' }}</div>
+            <div class="mt-1 text-xs text-slate-500">{{ getDepartmentLabel(session.dept_id) }} · {{ session.last_message_at ? formatTime(session.last_message_at) : '刚创建' }}</div>
           </button>
           <el-button
             text
@@ -82,11 +82,17 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { useChatSession } from '@/composables/useChatSession'
 import { useChatStore } from '@/store/chat'
+import { getDepartmentLabel } from '@/utils/erpDepartments'
 
 const chatStore = useChatStore()
 const sessions = computed(() => chatStore.sessions)
 const currentSessionId = computed(() => chatStore.currentSessionId)
-const currentDeptLabel = computed(() => `${chatStore.currentDeptId || 'default'} 部门`)
+const currentDeptLabel = computed(() => chatStore.canViewAllDepartments() && chatStore.scopeMode === 'all_departments'
+  ? (chatStore.scopeDeptId ? `${getDepartmentLabel(chatStore.scopeDeptId)} · CEO 视角` : '全部部门 · CEO 视角')
+  : `${getDepartmentLabel(chatStore.currentDeptId || chatStore.getEffectiveDeptId())}`)
+const panelDescription = computed(() => chatStore.canViewAllDepartments() && chatStore.scopeMode === 'all_departments'
+  ? 'CEO 可跨部门查看会话与执行结果；点击具体会话后会自动切入对应部门消息流。'
+  : '该部门会话统一承接审批提醒、执行结果回传和本部门流程调用。')
 const { selectSession, createSession, deleteSession } = useChatSession()
 const historyDialogVisible = ref(false)
 const historyPreviewLimit = 4

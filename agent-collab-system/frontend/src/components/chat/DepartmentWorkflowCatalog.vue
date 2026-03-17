@@ -3,7 +3,7 @@
     <div class="mb-3 flex items-center justify-between">
       <div>
         <div class="text-[11px] uppercase tracking-[0.22em] text-slate-500">部门流程目录</div>
-        <div class="mt-1 text-sm font-semibold text-slate-900">按 workflow 分类查看</div>
+        <div class="mt-1 text-sm font-semibold text-slate-900">{{ chatStore.canViewAllDepartments() && chatStore.scopeMode === 'all_departments' ? '按部门 / workflow 分类查看' : '按 workflow 分类查看' }}</div>
       </div>
       <span class="text-xs text-slate-500">{{ catalog.length }} 条</span>
     </div>
@@ -79,11 +79,14 @@ const historyItems = ref<WorkflowExecutionHistoryItem[]>([])
 const groupedCatalog = computed(() => {
   const groups = new Map<string, WorkflowCatalogItem[]>()
   catalog.value.forEach((item) => {
-    groups.set(item.category, [...(groups.get(item.category) ?? []), item])
+    const groupKey = chatStore.canViewAllDepartments() && chatStore.scopeMode === 'all_departments' ? `${item.dept_id}::${item.category}` : item.category
+    groups.set(groupKey, [...(groups.get(groupKey) ?? []), item])
   })
   return Array.from(groups.entries()).map(([category, items]) => ({
     category,
-    label: getWorkflowCategoryLabel(category),
+    label: chatStore.canViewAllDepartments() && chatStore.scopeMode === 'all_departments'
+      ? `${items[0]?.dept_id || ''} · ${getWorkflowCategoryLabel(category.split('::').pop() || category)}`
+      : getWorkflowCategoryLabel(category),
     items,
   }))
 })

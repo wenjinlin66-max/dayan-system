@@ -20,6 +20,7 @@
       </div>
       <div class="grid gap-4 px-6 py-5 xl:grid-cols-[320px_minmax(0,1.45fr)_300px]">
         <div class="space-y-4">
+          <ChatIdentityPanel />
           <ChatSidebar />
           <ApprovalWorkbench />
           <ExecutionResultCard />
@@ -41,6 +42,7 @@
 import { onMounted } from 'vue'
 
 import ApprovalWorkbench from '@/components/chat/ApprovalWorkbench.vue'
+import ChatIdentityPanel from '@/components/chat/ChatIdentityPanel.vue'
 import ChatSidebar from '@/components/chat/ChatSidebar.vue'
 import ChatWindow from '@/components/chat/ChatWindow.vue'
 import DepartmentWorkflowCatalog from '@/components/chat/DepartmentWorkflowCatalog.vue'

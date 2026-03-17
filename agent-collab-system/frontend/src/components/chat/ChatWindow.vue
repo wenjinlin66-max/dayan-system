@@ -21,7 +21,9 @@
       >
         <div class="mb-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
           <span>{{ message.role === 'user' ? '你' : '部门助手' }}</span>
+          <span v-if="showDeptBadge(message)" class="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-500">{{ message.dept_id }}</span>
           <span v-if="message.payload?.message_kind" class="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-500">{{ String(message.payload?.message_kind) }}</span>
+          <span v-if="formatMessageTime(message)" class="text-[11px] text-slate-400">{{ formatMessageTime(message) }}</span>
         </div>
         <div class="whitespace-pre-wrap leading-8 text-slate-800">{{ message.content }}</div>
 
@@ -68,6 +70,7 @@ const chatStore = useChatStore()
 const messages = computed(() => chatStore.messages)
 const startingWorkflowId = computed(() => chatStore.startingWorkflowId)
 const { startSelectedWorkflow } = useChatSession()
+const showDeptBadge = (message: ChatMessage) => chatStore.canViewAllDepartments() && chatStore.scopeMode === 'all_departments' && Boolean(message.dept_id)
 
 const candidateWorkflows = (message: ChatMessage): WorkflowCatalogItem[] => {
   const raw = message.payload?.candidate_workflows
@@ -90,5 +93,21 @@ const shouldShowInlineParameterCard = (message: ChatMessage, workflowId: string)
 
 const startWorkflow = async (workflowId: string, sourceMessageId: string) => {
   await startSelectedWorkflow(workflowId, 'candidate_confirmation', sourceMessageId)
+}
+
+const formatMessageTime = (message: ChatMessage) => {
+  if (!message.created_at) {
+    return ''
+  }
+  const value = new Date(message.created_at)
+  if (Number.isNaN(value.getTime())) {
+    return ''
+  }
+  return value.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 </script>

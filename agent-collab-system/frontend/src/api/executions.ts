@@ -1,7 +1,7 @@
 import { http } from './client'
 import type { WorkflowExecutionHistoryResponse } from '@/types/execution'
 
-export const fetchExecution = async (executionId: string) => http.get(`/v1/executions/${executionId}`)
+export const fetchExecution = async (executionId: string, params?: { dept_id?: string; include_all?: boolean }) => http.get(`/v1/executions/${executionId}`, { params })
 
 export const fetchWorkflowExecutionHistory = async (workflowId: string, params?: { include_all?: boolean }) =>
   http.get<WorkflowExecutionHistoryResponse>(`/v1/executions/workflow/${workflowId}/history`, { params })

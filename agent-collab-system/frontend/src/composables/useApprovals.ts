@@ -18,7 +18,10 @@ export const useApprovals = () => {
   )
 
   const loadApprovalTasks = async () => {
-    const res = await fetchApprovalTasks()
+    const params = chatStore.canViewAllDepartments()
+      ? { include_all: true, dept_id: chatStore.scopeDeptId || undefined }
+      : { dept_id: chatStore.getEffectiveDeptId() }
+    const res = await fetchApprovalTasks(params)
     chatStore.setApprovalTasks(res.data.items)
   }
 
@@ -29,21 +32,24 @@ export const useApprovals = () => {
     try {
       chatStore.setApprovalSubmitting(true)
       const task = selectedApprovalTask.value
+      const params = chatStore.canViewAllDepartments()
+        ? { include_all: true, dept_id: chatStore.scopeDeptId || undefined }
+        : { dept_id: chatStore.getEffectiveDeptId() }
       const res = await resumeApprovalTask({
         execution_id: task.execution_id,
         go_approval_id: task.go_approval_id,
         decision,
         comment: approvalComment.value.trim() || undefined,
       })
-      const executionRes = await fetchExecution(task.execution_id)
+      const executionRes = await fetchExecution(task.execution_id, params)
       chatStore.setLatestExecution(executionRes.data)
       executionStream.start(task.execution_id)
-      approvalComment.value = ''
-      await loadApprovalTasks()
-      if (chatStore.currentSessionId) {
-        const messagesRes = await fetchChatMessages(chatStore.currentSessionId)
-        chatStore.setMessages(messagesRes.data.items)
-      }
+        approvalComment.value = ''
+        await loadApprovalTasks()
+        if (chatStore.currentSessionId) {
+          const messagesRes = await fetchChatMessages(chatStore.currentSessionId, params)
+          chatStore.setMessages(messagesRes.data.items)
+        }
       ElMessage.success(decision === 'approved' ? '审批已通过，执行继续进行。' : '审批已驳回，执行已终止。')
       return res.data
     } catch (error) {

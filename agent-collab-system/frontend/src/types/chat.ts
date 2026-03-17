@@ -21,6 +21,8 @@ export interface WorkflowCatalogItem {
 export interface ChatMessage {
   message_id: string
   session_id: string
+  dept_id?: string | null
+  created_at?: string | null
   role: 'user' | 'assistant' | 'system'
   content: string | null
   route_type?: ChatRouteType | null

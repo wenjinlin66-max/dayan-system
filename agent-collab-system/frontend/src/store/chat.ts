@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 
 import type { ApprovalTask, ChatMessage, ChatSession, WorkflowCatalogItem } from '@/types/chat'
 import type { ExecutionStatus } from '@/types/execution'
+import { getChatIdentityProfile, loadStoredChatIdentityContext, saveStoredChatIdentityContext, type ChatScopeMode } from '@/utils/chatIdentity'
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
@@ -18,7 +19,16 @@ export const useChatStore = defineStore('chat', {
     approvalTasks: [] as ApprovalTask[],
     selectedApprovalTaskId: '' as string,
     approvalSubmitting: false,
+    activeProfileId: loadStoredChatIdentityContext().profileId,
+    scopeMode: loadStoredChatIdentityContext().scopeMode as ChatScopeMode,
+    scopeDeptId: loadStoredChatIdentityContext().scopeDeptId,
+    approvalFilterDeptId: '' as string,
+    executionFilterDeptId: '' as string,
+    latestExecutionByDept: {} as Record<string, ExecutionStatus>,
   }),
+  getters: {
+    activeProfile: (state) => getChatIdentityProfile(state.activeProfileId),
+  },
   actions: {
     setSessions(items: ChatSession[]) {
       this.sessions = items
@@ -54,6 +64,9 @@ export const useChatStore = defineStore('chat', {
     },
     setLatestExecution(item: ExecutionStatus | null) {
       this.latestExecution = item
+      if (item?.dept_id) {
+        this.latestExecutionByDept[item.dept_id] = item
+      }
     },
     setStreamConnected(value: boolean) {
       this.streamConnected = value
@@ -78,6 +91,78 @@ export const useChatStore = defineStore('chat', {
     },
     setApprovalSubmitting(value: boolean) {
       this.approvalSubmitting = value
+    },
+    setApprovalFilterDeptId(value: string) {
+      this.approvalFilterDeptId = value
+    },
+    setExecutionFilterDeptId(value: string) {
+      this.executionFilterDeptId = value
+    },
+    persistIdentityContext() {
+      saveStoredChatIdentityContext({
+        profileId: this.activeProfileId,
+        scopeMode: this.scopeMode,
+        scopeDeptId: this.scopeDeptId,
+      })
+    },
+    applyIdentityProfile(profileId: string) {
+      this.activeProfileId = profileId
+      const profile = getChatIdentityProfile(profileId)
+      this.scopeMode = profile.roles.includes('ceo') ? this.scopeMode : 'department'
+      this.scopeDeptId = profile.roles.includes('ceo') ? (this.scopeDeptId || 'production') : profile.deptId
+      this.currentSessionId = ''
+      this.messages = []
+      this.sessions = []
+      this.catalog = []
+      this.approvalTasks = []
+      this.approvalFilterDeptId = ''
+      this.executionFilterDeptId = ''
+      this.latestExecutionByDept = {}
+      this.persistIdentityContext()
+    },
+    applyScopeMode(scopeMode: ChatScopeMode) {
+      this.scopeMode = scopeMode
+      if (!this.scopeDeptId) {
+        this.scopeDeptId = 'production'
+      }
+      if (scopeMode === 'all_departments') {
+        this.currentSessionId = ''
+      }
+      this.persistIdentityContext()
+    },
+    applyScopeDeptId(deptId: string) {
+      this.scopeDeptId = deptId
+      if (deptId) {
+        this.currentDeptId = deptId
+      }
+      this.approvalFilterDeptId = deptId
+      this.executionFilterDeptId = deptId
+      this.persistIdentityContext()
+    },
+    syncIdentityFromAuth(payload: { userId: string; deptId: string; roles: string[]; profileId: string }) {
+      this.activeProfileId = payload.profileId
+      this.scopeMode = payload.roles.includes('ceo') ? 'all_departments' : 'department'
+      this.scopeDeptId = payload.roles.includes('ceo') ? (this.scopeDeptId || 'production') : payload.deptId
+      this.currentDeptId = payload.roles.includes('ceo') ? (this.scopeDeptId || 'production') : payload.deptId
+      this.currentSessionId = ''
+      this.sessions = []
+      this.messages = []
+      this.catalog = []
+      this.approvalTasks = []
+      this.latestExecution = null
+      this.latestExecutionByDept = {}
+      this.approvalFilterDeptId = this.currentDeptId
+      this.executionFilterDeptId = this.currentDeptId
+      this.persistIdentityContext()
+    },
+    getEffectiveDeptId() {
+      if (this.activeProfile.roles.includes('ceo')) {
+        return this.scopeDeptId || this.currentDeptId || 'production'
+      }
+      return this.activeProfile.deptId
+    },
+    canViewAllDepartments() {
+      return this.activeProfile.roles.includes('ceo')
     },
   },
 })

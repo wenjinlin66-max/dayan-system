@@ -3,9 +3,15 @@
     <div class="mb-3 flex items-center justify-between gap-3">
       <div>
         <div class="text-[11px] uppercase tracking-[0.22em] text-amber-600/80">审批工作区</div>
-        <div class="mt-1 text-sm font-semibold text-slate-900">当前部门审批待办</div>
+        <div class="mt-1 text-sm font-semibold text-slate-900">{{ approvalTitle }}</div>
       </div>
       <div class="text-xs text-slate-500">待处理 {{ approvalTasks.length }} 项</div>
+    </div>
+    <div v-if="chatStore.canViewAllDepartments()" class="mb-3">
+      <el-select v-model="filterDeptId" class="w-full" placeholder="筛选审批所属部门">
+        <el-option label="全部部门" value="" />
+        <el-option v-for="item in deptOptions" :key="item.value" :label="item.label" :value="item.value" />
+      </el-select>
     </div>
     <div v-if="approvalTasks.length === 0" class="rounded-xl border border-dashed border-amber-200 bg-white/70 px-4 py-8 text-center text-sm text-slate-500">
       当前没有待处理审批。
@@ -35,12 +41,27 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 
 import ApprovalCard from './ApprovalCard.vue'
 import { useApprovals } from '@/composables/useApprovals'
+import { useChatStore } from '@/store/chat'
+import { ERP_DEPARTMENT_OPTIONS } from '@/utils/erpDepartments'
 
+const chatStore = useChatStore()
 const { approvalTasks, approvalComment, selectedApprovalTask, loadApprovalTasks, submitApproval, selectApprovalTask, approvalSubmitting } = useApprovals()
+const approvalTitle = computed(() => chatStore.canViewAllDepartments() && chatStore.scopeMode === 'all_departments' ? 'CEO 当前范围审批待办' : '当前部门审批待办')
+const deptOptions = ERP_DEPARTMENT_OPTIONS.filter((item) => item.value !== 'ceo')
+const filterDeptId = computed({
+  get: () => chatStore.approvalFilterDeptId,
+  set: async (value: string) => {
+    chatStore.setApprovalFilterDeptId(value)
+    if (value) {
+      chatStore.applyScopeDeptId(value)
+    }
+    await loadApprovalTasks()
+  },
+})
 
 onMounted(async () => {
   await loadApprovalTasks()

@@ -5,11 +5,24 @@ import { createChatSession, deleteChatSession, fetchChatMessages, fetchChatSessi
 import { fetchExecution } from '@/api/executions'
 import { useChatStore } from '@/store/chat'
 import { useExecutionStream } from '@/composables/useExecutionStream'
+import type { ChatSession } from '@/types/chat'
 
 export const useChatSession = () => {
   const chatStore = useChatStore()
   const executionStream = useExecutionStream()
   const approvals = useApprovals()
+
+  const resolveScopeParams = () => {
+    if (chatStore.canViewAllDepartments()) {
+      return {
+        include_all: true,
+        dept_id: chatStore.scopeDeptId || undefined,
+      }
+    }
+    return {
+      dept_id: chatStore.getEffectiveDeptId(),
+    }
+  }
 
   const initialize = async () => {
     const sessionsRes = await refreshSessions()
@@ -18,6 +31,9 @@ export const useChatSession = () => {
     if (!sessionId) {
       if (sessionsRes.length > 0) {
         sessionId = sessionsRes[0].session_id
+      } else if (chatStore.canViewAllDepartments() && chatStore.scopeMode === 'all_departments') {
+        await Promise.all([loadCatalog(), approvals.loadApprovalTasks()])
+        return
       } else {
         const created = await createChatSession('当前部门主对话框')
         sessionId = created.data.session_id
@@ -42,7 +58,7 @@ export const useChatSession = () => {
   }
 
   const refreshSessions = async () => {
-    const sessionsRes = await fetchChatSessions()
+    const sessionsRes = await fetchChatSessions(resolveScopeParams())
     chatStore.setSessions(sessionsRes.data)
     if (sessionsRes.data.length > 0 && !chatStore.currentDeptId) {
       chatStore.setCurrentDept(sessionsRes.data[0].dept_id)
@@ -51,7 +67,7 @@ export const useChatSession = () => {
   }
 
   const deleteSession = async (sessionId: string) => {
-    await deleteChatSession(sessionId)
+    await deleteChatSession(sessionId, resolveScopeParams())
     const deletingCurrent = chatStore.currentSessionId === sessionId
     chatStore.removeSession(sessionId)
 
@@ -69,13 +85,25 @@ export const useChatSession = () => {
   }
 
   const loadMessages = async (sessionId: string) => {
-    const res = await fetchChatMessages(sessionId)
+    const res = await fetchChatMessages(sessionId, resolveScopeParams())
     chatStore.setMessages(res.data.items)
   }
 
   const loadCatalog = async () => {
-    const res = await fetchWorkflowCatalog()
+    const res = await fetchWorkflowCatalog(resolveScopeParams())
     chatStore.setCatalog(res.data.items)
+  }
+
+  const reloadForContextChange = async () => {
+    const sessions = await refreshSessions()
+    const nextSessionId = sessions.find((item: ChatSession) => item.session_id === chatStore.currentSessionId)?.session_id ?? sessions[0]?.session_id ?? ''
+    chatStore.setCurrentSession(nextSessionId)
+    if (nextSessionId) {
+      await Promise.all([loadMessages(nextSessionId), loadCatalog(), approvals.loadApprovalTasks()])
+    } else {
+      chatStore.setMessages([])
+      await Promise.all([loadCatalog(), approvals.loadApprovalTasks()])
+    }
   }
 
   const sendMessage = async (content: string) => {
@@ -88,16 +116,17 @@ export const useChatSession = () => {
         message_id: `local_${Date.now()}`,
         session_id: chatStore.currentSessionId,
         role: 'user' as const,
+        created_at: new Date().toISOString(),
         content,
         payload: null,
       }
       chatStore.pushMessage(userMessage)
 
-      const res = await sendChatMessage(chatStore.currentSessionId, content)
+      const res = await sendChatMessage(chatStore.currentSessionId, content, resolveScopeParams())
       chatStore.pushMessage(res.data)
 
       if (res.data.related_execution_id) {
-        const executionRes = await fetchExecution(res.data.related_execution_id)
+        const executionRes = await fetchExecution(res.data.related_execution_id, resolveScopeParams())
         chatStore.setLatestExecution(executionRes.data)
         executionStream.start(res.data.related_execution_id)
       }
@@ -135,10 +164,10 @@ export const useChatSession = () => {
           note,
           source_message_id: sourceMessageId,
           input_values: inputValues,
-        })
+        }, resolveScopeParams())
         chatStore.pushMessage(res.data)
         if (res.data.related_execution_id) {
-          const executionRes = await fetchExecution(res.data.related_execution_id)
+          const executionRes = await fetchExecution(res.data.related_execution_id, resolveScopeParams())
           chatStore.setLatestExecution(executionRes.data)
           executionStream.start(res.data.related_execution_id)
         }
@@ -149,5 +178,6 @@ export const useChatSession = () => {
         chatStore.setStartingWorkflowId('')
       }
     },
+    reloadForContextChange,
   }
 }

@@ -1,9 +1,9 @@
 <template>
   <div class="space-y-3">
-    <el-input v-model="content" type="textarea" :rows="4" resize="none" placeholder="直接向 AI 提问，或描述你想让当前部门执行的任务。Shift+Enter 可继续换行，Enter 发送。" @keydown.enter="handleKeydown" />
+    <el-input v-model="content" :disabled="composerDisabled" type="textarea" :rows="4" resize="none" placeholder="直接向 AI 提问，或描述你想让当前部门执行的任务。Shift+Enter 可继续换行，Enter 发送。" @keydown.enter="handleKeydown" />
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="text-xs text-slate-500">主对话区优先处理问答；如命中部门 workflow，会继续给出流程候选与执行结果。</div>
-      <el-button type="primary" :loading="sending" @click="handleSend">发送给 AI</el-button>
+      <div class="text-xs text-slate-500">{{ composerHint }}</div>
+      <el-button type="primary" :disabled="composerDisabled" :loading="sending" @click="handleSend">发送给 AI</el-button>
     </div>
   </div>
 </template>
@@ -17,6 +17,8 @@ import { useChatStore } from '@/store/chat'
 const content = ref('')
 const chatStore = useChatStore()
 const sending = computed(() => chatStore.sending)
+const composerDisabled = computed(() => chatStore.canViewAllDepartments() && chatStore.scopeMode === 'all_departments' && !chatStore.currentSessionId)
+const composerHint = computed(() => composerDisabled.value ? 'CEO 总览模式下，请先选择一个具体会话后再发送消息。' : '主对话区优先处理问答；如命中部门 workflow，会继续给出流程候选与执行结果。')
 const { sendMessage } = useChatSession()
 
 const handleSend = async () => {

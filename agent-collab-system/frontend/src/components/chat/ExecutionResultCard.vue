@@ -9,6 +9,12 @@
         {{ execution.status }}
       </div>
     </div>
+    <div v-if="chatStore.canViewAllDepartments()" class="mb-3">
+      <el-select v-model="filterDeptId" class="w-full" placeholder="筛选执行结果所属部门">
+        <el-option label="全部部门" value="" />
+        <el-option v-for="item in deptOptions" :key="item.value" :label="item.label" :value="item.value" />
+      </el-select>
+    </div>
     <div v-if="!execution" class="text-sm text-slate-500">当前部门对话框还没有新的 execution 回传。</div>
     <div v-else class="space-y-3 text-sm text-slate-700">
       <div class="space-y-1">
@@ -60,8 +66,21 @@
 import { computed } from 'vue'
 
 import { useChatStore } from '@/store/chat'
+import { ERP_DEPARTMENT_OPTIONS } from '@/utils/erpDepartments'
 const chatStore = useChatStore()
-const execution = computed(() => chatStore.latestExecution)
+const deptOptions = ERP_DEPARTMENT_OPTIONS.filter((item) => item.value !== 'ceo')
+const filterDeptId = computed({
+  get: () => chatStore.executionFilterDeptId,
+  set: (value: string) => {
+    chatStore.setExecutionFilterDeptId(value)
+  },
+})
+const execution = computed(() => {
+  if (chatStore.canViewAllDepartments() && filterDeptId.value && chatStore.latestExecutionByDept[filterDeptId.value]) {
+    return chatStore.latestExecutionByDept[filterDeptId.value]
+  }
+  return chatStore.latestExecution
+})
 const sensorOutputs = computed(() => {
   const rawOutputs = execution.value?.final_output?.sensor_outputs
   if (!rawOutputs || typeof rawOutputs !== 'object') {
