@@ -134,6 +134,11 @@ src/
 9. 若 `execution_agent` 配置写回 mock records，则再把结果写回 `dayan_mock_records`
 10. 前端业务表格区刷新后看到真实修改结果
 
+当前阶段补充口径：
+- 业务表格区的**被动事件触发不按当前登录账号部门过滤 workflow**；它应扫描所有已发布 workflow，只要 `sensor_agent` 的来源/表/事件键/条件命中就启动 execution
+- 被动触发时，execution 的 `dept_id` 取命中 workflow 的 `owner_dept_id`，从而把执行结果、审批与对话框报告投递回对应部门，而不是投递到“当前修改数据的人”的部门
+- CEO / 部门账号的差异只体现在“主动查看哪些对话框、主动启动哪些 workflow”的可见性与权限；业务表格的被动触发本身不应因为登录者是 CEO 还是部门账号而改变命中范围
+
 ### 7.2 必须保持的正式契约口径
 - 事件信封结构继续沿用 Dayan `api-event-contracts.md`
 - `sensor_agent` 配置结构继续沿用 workflow DSL

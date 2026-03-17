@@ -162,6 +162,11 @@
 | /api/v1/records/tables/:table_name/rows/:record_id | DELETE | 删除记录并触发标准事件 | Python侧鉴权 | 是 |
 | /api/v1/records/events/recent | GET | 获取最近事件与触发 execution 摘要 | Python侧鉴权 | 是 |
 
+补充触发约束：
+- `POST/PUT/DELETE /api/v1/records/tables/*` 产生的被动事件，不应按当前登录用户的 `dept_id` 去筛选 workflow，而应扫描所有 `active + current release` 的 workflow 并按 `sensor_agent` 配置匹配
+- 一旦命中某条 workflow，被动触发创建 execution 时应使用该 workflow 的 `owner_dept_id` 作为 execution 部门上下文
+- 事件信封中的 `event.dept_id` 当前同样应写入命中 workflow 的 `owner_dept_id`，确保后续 chat/approval/result delivery 都回到该 workflow 所属部门主链
+
 ### 2.4 监控与运维接口
 | 接口 | 方法 | 说明 | 鉴权 | 幂等 |
 |---|---|---|---|---|

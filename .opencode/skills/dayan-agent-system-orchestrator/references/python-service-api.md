@@ -146,6 +146,22 @@ Python 服务对外提供 5 类能力：
 - `POST /api/v1/executions/inject/mock-event` 当前使用 FastAPI `BackgroundTasks` 在返回 `execution_id` 后继续后台推进 execution；不再使用 `asyncio.create_task(...)` 直接裸起任务，以降低 Windows/本地开发态下 mock inject 续跑失效的概率
 - runtime 在持久化 `final_output` 与 checkpoint 时，当前会对 `history / context / sensor_outputs / decision_outputs / tool_outputs / errors` 做独立快照，避免 JSON 字段因复用原始引用而出现“current_node 已推进，但 final_output 仍为空”的脏写现象
 - 业务表格区自动触发 workflow 时，当前对 `source_system` 做临时兼容：`dayan_mock_records` 产生的表格变更事件可匹配配置为 `erp_prod` 的感知 workflow，便于配置员在临时测试表上验证正式 ERP 风格的低库存流程
+- 对于 `result_delivery=chat` 的执行节点，当前不再强依赖已有 `trigger.session_id`；若 execution 是事件触发且没有 chat session，后端会自动复用或创建“当前用户 + 目标部门”的主对话会话，并把 execution result 以 `message_kind=execution_result` 系统消息追加进去
+- `GET /api/v1/chat/sessions` 当前支持 `include_all=true` 与 `dept_id` 组合；仅当请求角色包含 `ceo` 时才允许跨部门读取全部门会话，普通部门账号仍按 `dept_id + user_id` 严格隔离
+- `GET /api/v1/chat/sessions/{session_id}/messages` 当前已支持 CEO 读取跨部门会话消息；普通部门账号仍只能读取自己的部门会话
+- `POST /api/v1/chat/sessions/{session_id}/messages` 当前已支持 `dept_id + include_all` scope 参数；CEO 在聚焦具体部门会话时发消息，会先按 scope 校验会话，再以该会话所属部门继续写入消息与执行路由，不再因为 token 自身 `dept_id=ceo` 而返回 404
+- `POST /api/v1/chat/sessions/{session_id}/workflows/{workflow_id}/start` 当前也已支持 `dept_id + include_all` scope 参数，保证 CEO 在具体部门会话里可直接启动该部门 workflow
+- `GET /api/v1/chat/workflows/catalog` 与 `GET /api/v1/approvals` 当前也支持 `include_all=true` + `dept_id` 范围过滤，用于 CEO 对话总览下查看全部门 workflow 目录与审批待办
+- `ChatMessageResponse` 当前已稳定返回 `created_at`；前端消息流可直接按返回时间展示历史消息时间戳
+- 请求上下文当前会从 `x-roles` 头解析角色列表；前端已使用账号身份面板动态注入 `x-user-id / x-dept-id / x-roles`
+- 当前已新增认证接口：
+  - `POST /api/v1/auth/login`：输入静态原型账号 `username/password`，返回 bearer token 与身份信息（`user_id / dept_id / display_name / roles`）
+  - `GET /api/v1/auth/me`：基于 bearer token 返回当前身份上下文
+- `get_request_context` 当前优先从 `Authorization: Bearer <token>` 解析 `user_id / dept_id / display_name / roles`；仅在未登录时才回退到旧的 header 兼容路径
+- `GET /api/v1/executions/{execution_id}/stream` 当前已支持 `access_token` query 参数，解决前端 `EventSource` 不能发送 Authorization header 的问题
+- `GET /api/v1/executions/workflow/{workflow_id}/history?include_all=true` 与 `GET /api/v1/workflows?include_all=true` 当前均已增加 CEO 角色门禁，普通账号不能用 crafted request 越权看全部门
+- CEO 单部门查看当前通过 `include_all=true + dept_id=<目标部门>` 工作：`/v1/chat/sessions`、`/v1/chat/sessions/{id}/messages`、`/v1/chat/workflows/catalog`、`/v1/approvals`、`/v1/executions/{id}` 与 `/v1/executions/{id}/stream` 都已支持这种 CEO 聚焦部门口径
+- chat workflow 目录当前在 service 层按 `workflow_id` 去重，避免 `workflow_registry` 中历史版本/重复有效行导致 CEO 目录重复显示同一 workflow 多次
 
 ### 8.1 department_table adapter 当前行为
 - `execution_agent` 不再直接内嵌 mock writer，而是通过 `ToolRegistry` 解析 `department_table` writer

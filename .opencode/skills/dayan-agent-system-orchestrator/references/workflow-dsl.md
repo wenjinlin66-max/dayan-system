@@ -206,7 +206,21 @@
     "severity": "high",
     "target_item_id": "A-1001",
     "target_warehouse_id": "W-01",
-    "recommended_quantity": 200
+    "target_dept_id": "production",
+    "recommended_quantity": 200,
+    "chat_report": {
+      "title": "库存风险预警",
+      "content": "A-1001 库存低于安全库存，建议立即补货并通知生产部门关注。",
+      "audience": "production"
+    },
+    "table_write": {
+      "item_id": "A-1001",
+      "warehouse_id": "W-01",
+      "current_stock": 16,
+      "safety_limit": 20,
+      "recommended_quantity": 200,
+      "status": "待处理"
+    }
   },
   "risk_level": "medium",
   "recommended_actions": [
@@ -227,10 +241,13 @@
 - `decision_mode`：`rule | model | llm`
 - `decision_summary`：给人读的简要结论
 - `decision_payload`：结构化业务结果
+- `decision_payload.chat_report`：供 `department_chat` 执行节点直接消费的风险报告块
+- `decision_payload.table_write`：供 `department_table` 执行节点直接消费的结构化写表块
 - `risk_level`：`low | medium | high`
 - `recommended_actions`：推荐执行动作数组
 - `explanation`：解释原因
 - `citations`：仅 LLM + RAG 模式推荐返回
+- 决策型只输出 **一份统一结构化结果**；后续 `parallel` 后的多个执行型节点共享消费这同一份结果，而不是由决策型分别给每个执行型单独发不同内容
 
 ### 5.3 execution_agent
 - `tool_mode`: `manual | auto`
@@ -250,12 +267,19 @@
 
 `execution_targets` 中推荐支持的 `target_type`：
 - `go_api`
+- `department_chat`
 - `department_table`
 - `feishu`
 - `email`
 - `device`
 - `file`
 - `mcp`
+
+当前执行型节点新口径：
+- 一个 `execution_agent` 默认表达 **一个执行目标语义**，例如“发送部门对话框风险报告”或“写入部门业务表”
+- 若业务上既要“发送风险报告到对话框”又要“修改业务表格/调用第三方”，应在 `decision_agent` 后通过 `parallel` 节点并列挂多个 `execution_agent`
+- `execution_target_mode=ai_select` 的含义是：在当前 execution 节点的候选目标集合中，由 AI 选择一个最合适的目标执行；它不替代多节点并列执行
+- `approval_required / approval_mode` 属于 execution 节点自身能力：命中审批后在当前 execution 节点挂起，审批通过后继续执行该 execution 节点，而不是必须额外插一个 approval 节点
 
 执行型节点推荐示例：
 ```json
@@ -294,6 +318,14 @@
 - `default_values`：缺省值注入
 - `idempotency_key_template`：防重复写入模板
 - `write_result_contract`：写入后回传结构
+
+执行型节点当前补充口径：
+- `target_type=department_chat` 表示该 execution 节点的主目标就是“把决策结果发送到目标部门对话框”，不是结果回传的副作用
+- `target_type=department_table` 表示该 execution 节点的主目标是写表；如仍需要把执行结果摘要通知到对话区，可继续使用 `result_delivery`
+- `result_target_dept_id` 用于显式指定 chat 报告或结果摘要的目标部门；未配置时优先从 `decision_payload.target_dept_id / decision_payload.dept_id` 推导，否则回退当前执行部门
+- `result_template` 用于自定义 `department_chat` 目标的报告正文，支持 `{{decision_summary}} / {{risk_level}} / {{decision_explanation}} / {{recommended_actions}} / {{target_item_id}} / {{recommended_quantity}} / {{result_summary}}` 等变量
+- `chat_delivery.send_summary` 控制默认报告首段是否包含风险摘要；`chat_delivery.send_failure_reason` 为失败态报告预留配置位
+- 当前运行时已开始支持 `parallel` 节点的最小分支调度，用于在 `decision -> parallel -> 多 execution_agent` 口径下顺序执行并列分支；后续再继续增强为更完整的 fork/join 语义
 
 `department_table` 推荐示例：
 ```json
@@ -343,6 +375,7 @@
 - 可配置是否进入审批
 - 审批卡片必须可投递到对话工作区
 - 执行结果必须可回传到对话工作区
+- 执行型节点应支持“只发部门对话框报告、不做数据库写入”的 chat-only 路径，用于风险提示、告警播报、第三方消息转述等轻执行场景
 
 ### 5.4 dialog_agent
 - `entry_mode`: `ask | approve | command`

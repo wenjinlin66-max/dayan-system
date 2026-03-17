@@ -141,7 +141,21 @@ agent-collab-module/
 - workflow 运行时，当前执行节点应在画布中出现明显的动态炫彩高亮，且高亮位置应跟随后端 `current_node` 变化实时移动
 - 为保证节点高亮真的可见，制作区的 mock event inject 当前应采用“先返回 execution_id、后端后台继续执行、前端轮询 execution 状态”的方式，而不是等整条 workflow 同步跑完再返回
 - 工作流执行历史弹窗当前必须补“执行结果”摘要区，不再只展示任务/对象/时间三块粗信息；对于执行型历史项，应直接展示执行是否成功、写入到哪个对象，以及字段级变更明细
+- `ExecutionConfigPanel.vue` 当前已从“只配置 department_table 写入”扩展为“多目标 / chat-delivery”面板：当 `结果回传=对话区` 且目标编码留空时，执行型节点进入 chat-only 模式，只把决策结果整理为 AI 风险报告发到目标部门对话框，不做业务表写入
+- 执行型面板当前应支持：`result_target_dept_id`、`chat_delivery.send_summary/send_failure_reason`、`result_template` 三类对话回传配置；模板变量至少包含 `decision_summary / risk_level / decision_explanation / recommended_actions / target_item_id / recommended_quantity / result_summary`
+- `ExecutionConfigPanel.vue` 当前已进一步收口为“单目标执行器”面板：配置员必须先明确当前 execution 节点的主目标类型（`department_chat / department_table / feishu / email / mcp`），再填写该目标的路由与参数
+- 若同一条 workflow 既要“发部门对话框风险报告”又要“修改业务表格/调第三方工具”，前端应引导配置员在 `decision_agent` 后插入 `parallel` 节点，并并列创建多个 `execution_agent`；不要继续把多个业务目标混在一个 execution 节点的面板里
+- `department_chat` 目标当前应直接作为执行目标类型出现，而不是藏在“结果回传”概念下；表格执行结果的摘要通知仍可保留 `result_delivery` 作为辅助配置，但不应替代独立 chat 执行节点
 - 业务表格区当前是临时测试入口，但应能触发配置为 `erp_prod` 的库存/工单/设备类感知 workflow；后端已为 `dayan_mock_records <-> erp_prod` 增加兼容匹配，避免配置员在表格区改了数据却发现 execution 仍为空
+- 对话区当前已进入“部门身份 + CEO 总览”第一版：前端通过身份面板切换账号与范围，部门账号只看自己的部门会话；CEO 账号可切到全部门总览，并按部门过滤会话、流程目录与审批待办
+- `ChatSidebar.vue`、`DepartmentWorkflowCatalog.vue`、`ApprovalWorkbench.vue`、`MessageComposer.vue` 当前都必须感知 chat identity scope；CEO 在“全部门”模式下默认以跨部门查看为主，切到具体会话后再继续阅读/操作
+- 当前已开始落地真正账号登录模型：新增 `LoginPage.vue`、auth store、路由守卫和 `/login` 入口；未登录用户默认不能进入工作台，必须先登录生产部/仓储部/供应链部/CEO 账号
+- `ChatIdentityPanel.vue` 当前已从“伪登录身份切换器”收敛为“当前登录账号 + CEO 范围控制器”；普通部门账号只显示当前身份，CEO 账号才允许切换单部门/全部门视图与聚焦部门
+- `ChatWindow.vue` 当前在 CEO 全部门模式下会显示消息所属部门标签；`ApprovalWorkbench.vue` 与 `ExecutionResultCard.vue` 也已补部门过滤入口，用于跨部门审批和执行结果筛选
+- `ChatWindow.vue` 当前消息头应显示时间：历史消息优先使用后端返回的 `created_at`，本地刚发送的用户消息也应立即带本地时间，避免“发送后短暂无时间、刷新后才出现”的割裂体验
+- CEO 单部门模式当前不再退化为“普通用户只看自己 user_id 的会话”；前端会统一以 `include_all=true + dept_id=<目标部门>` 方式请求 chat / approvals / executions 范围接口，保证 CEO 在聚焦生产部时能直接看到生产部真实会话与结果，而不是空白或 404
+- CEO 在具体部门会话中的“发送消息 / 从 chat 启动 workflow”当前也必须复用同一套 `include_all=true + dept_id=<目标部门>` scope 参数，不能只在列表/消息读取时带 scope、而在写操作上退回 `ceo` 本部门作用域
+- CEO 右侧 workflow 目录当前已按 `workflow_id` 去重，不再因为 `workflow_registry` 多版本有效记录而把同一个 workflow 重复渲染成多张卡片
 
 感知型节点第一阶段必须优先支持：
 - 数据库实时感知配置
