@@ -138,27 +138,30 @@ class MockRecordsService:
         return MockRecordsRowListResponse(table_name=table_name, rows=[self._serialize_row(row) for row in rows])
 
     async def create_row(self, table_name: str, values: dict[str, object], *, dept_id: str, user_id: str) -> MockRecordMutationResponse:
+        _ = dept_id
         before = None
         row = await self.repository.create_row(table_name, self._sanitize_values(table_name, values, allow_record_id=False))
         after = self._serialize_row(row)
-        return await self._finalize_mutation(table_name, row.id, "created", before, after, dept_id=dept_id, user_id=user_id)
+        return await self._finalize_mutation(table_name, row.id, "created", before, after, user_id=user_id)
 
     async def update_row(self, table_name: str, record_id: str, values: dict[str, object], *, dept_id: str, user_id: str) -> MockRecordMutationResponse:
+        _ = dept_id
         existing = await self.repository.get_row(table_name, record_id)
         if existing is None:
             raise ValueError("RECORD_NOT_FOUND")
         before = self._serialize_row(existing)
         row = await self.repository.update_row(table_name, record_id, self._sanitize_values(table_name, values, allow_record_id=False))
         after = self._serialize_row(row)
-        return await self._finalize_mutation(table_name, row.id, "updated", before, after, dept_id=dept_id, user_id=user_id)
+        return await self._finalize_mutation(table_name, row.id, "updated", before, after, user_id=user_id)
 
     async def delete_row(self, table_name: str, record_id: str, *, dept_id: str, user_id: str) -> MockRecordMutationResponse:
+        _ = dept_id
         existing = await self.repository.get_row(table_name, record_id)
         if existing is None:
             raise ValueError("RECORD_NOT_FOUND")
         before = self._serialize_row(existing)
         row = await self.repository.delete_row(table_name, record_id)
-        return await self._finalize_mutation(table_name, row.id, "deleted", before, before or {}, dept_id=dept_id, user_id=user_id)
+        return await self._finalize_mutation(table_name, row.id, "deleted", before, before or {}, user_id=user_id)
 
     async def list_recent_events(self) -> MockRecordsRecentEventsResponse:
         events = await self.repository.list_recent_events()
@@ -186,7 +189,6 @@ class MockRecordsService:
         before: dict[str, object] | None,
         after: dict[str, object],
         *,
-        dept_id: str,
         user_id: str,
     ) -> MockRecordMutationResponse:
         event_type = f"record.{operation}"
@@ -199,7 +201,6 @@ class MockRecordsService:
             operation=operation,
             before=before,
             after=after,
-            dept_id=dept_id,
             user_id=user_id,
         )
 
@@ -237,23 +238,32 @@ class MockRecordsService:
         operation: str,
         before: dict[str, object] | None,
         after: dict[str, object],
-        dept_id: str,
         user_id: str,
     ) -> list[str]:
-        workflows = await self.workflow_repository.list_workflows_by_dept(dept_id)
+        workflows = await self.workflow_repository.list_workflows()
         execution_ids: list[str] = []
         for workflow in workflows:
+            workflow_dept_id = workflow.owner_dept_id
             release = await self.workflow_repository.get_current_release(workflow.id)
             if release is None or release.compile_status != "success" or not release.execution_dag:
-                logger.info("skip workflow auto-trigger: workflow_id=%s reason=no_released_compiled_dag", workflow.id)
+                logger.info(
+                    "skip workflow auto-trigger: workflow_id=%s workflow_dept_id=%s reason=no_released_compiled_dag",
+                    workflow.id,
+                    workflow_dept_id,
+                )
                 continue
             if not self._has_canvas_nodes(release.ui_schema):
-                logger.warning("skip workflow auto-trigger: workflow_id=%s reason=empty_canvas_nodes", workflow.id)
+                logger.warning(
+                    "skip workflow auto-trigger: workflow_id=%s workflow_dept_id=%s reason=empty_canvas_nodes",
+                    workflow.id,
+                    workflow_dept_id,
+                )
                 continue
             if not self._release_matches_event(release.execution_dag, table_name=table_name, event_type=event_type, operation=operation):
                 logger.info(
-                    "skip workflow auto-trigger: workflow_id=%s reason=event_not_matched table=%s event_type=%s operation=%s",
+                    "skip workflow auto-trigger: workflow_id=%s workflow_dept_id=%s reason=event_not_matched table=%s event_type=%s operation=%s",
                     workflow.id,
+                    workflow_dept_id,
                     table_name,
                     event_type,
                     operation,
@@ -264,7 +274,7 @@ class MockRecordsService:
                     workflow_id=workflow.id,
                     version=release.version,
                     mode="released",
-                    dept_id=dept_id,
+                    dept_id=workflow_dept_id,
                     trigger=ExecutionTrigger(type="event", event_id=event_id),
                     operator=ExecutionOperator(user_id=user_id, roles=[]),
                     input={
@@ -272,7 +282,7 @@ class MockRecordsService:
                             "event_id": event_id,
                             "event_type": event_type,
                             "source": "records_workbench",
-                            "dept_id": dept_id,
+                            "dept_id": workflow_dept_id,
                             "payload": {
                                 "source_system": "dayan_mock_records",
                                 "table": table_name,
@@ -284,7 +294,7 @@ class MockRecordsService:
                         }
                     },
                 ),
-                dept_id=dept_id,
+                dept_id=workflow_dept_id,
                 user_id=user_id,
             )
             execution_ids.append(response.execution_id)
@@ -333,7 +343,9 @@ class MockRecordsService:
         if not isinstance(ui_schema, dict):
             return False
         raw_nodes = ui_schema.get("nodes")
-        return isinstance(raw_nodes, list) and len(raw_nodes) > 0
+        if not isinstance(raw_nodes, list):
+            return False
+        return len(cast(list[object], raw_nodes)) > 0
 
     def _get_table_config(self, table_name: str) -> TableConfig:
         config = TABLE_CONFIGS.get(table_name)
