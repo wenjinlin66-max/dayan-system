@@ -60,6 +60,10 @@ const paletteMap: Record<string, { card: string; badge: string }> = {
     card: 'border-emerald-300 bg-white',
     badge: 'bg-emerald-100 text-emerald-700',
   },
+  parallel: {
+    card: 'border-cyan-300 bg-white',
+    badge: 'bg-cyan-100 text-cyan-700',
+  },
   approval: {
     card: 'border-rose-300 bg-white',
     badge: 'bg-rose-100 text-rose-700',

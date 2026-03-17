@@ -183,6 +183,7 @@ import WorkspaceTopNav from '@/components/layout/WorkspaceTopNav.vue'
 import NodeConfigPanel from '@/components/canvas/NodeConfigPanel.vue'
 import { useWorkflowPublish } from '@/composables/useWorkflowPublish'
 import { fetchExecution, injectMockEvent } from '@/api/executions'
+import { useAuthStore } from '@/store/auth'
 import { useWorkflowStore } from '@/store/workflow'
 import { ERP_DEPARTMENT_OPTIONS, getDepartmentLabel } from '@/utils/erpDepartments'
 import { WORKFLOW_TRIGGER_TYPE_OPTIONS } from '@/utils/workflowCategory'
@@ -191,6 +192,7 @@ import type { ExecutionStatus } from '@/types/execution'
 import { ElMessageBox } from 'element-plus'
 
 const workflowStore = useWorkflowStore()
+const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -247,6 +249,18 @@ const stopRuntimeTracking = () => {
   }
 }
 
+const resolveExecutionScopeParams = () => {
+  if (authStore.isCEO) {
+    return {
+      include_all: true,
+      dept_id: workflowStore.ownerDeptId,
+    }
+  }
+  return {
+    dept_id: workflowStore.ownerDeptId,
+  }
+}
+
 const syncRuntimeExecution = (payload: ExecutionStatus) => {
   workflowStore.setRuntimeExecution({
     executionId: payload.execution_id,
@@ -258,7 +272,7 @@ const syncRuntimeExecution = (payload: ExecutionStatus) => {
 const startRuntimeTracking = async (executionId: string) => {
   stopRuntimeTracking()
   try {
-    const initial = await fetchExecution(executionId)
+    const initial = await fetchExecution(executionId, resolveExecutionScopeParams())
     syncRuntimeExecution(initial.data)
   } catch {
     workflowStore.setRuntimeExecution({ executionId, status: 'running', currentNode: null })
@@ -266,7 +280,7 @@ const startRuntimeTracking = async (executionId: string) => {
 
   runtimePollTimer = window.setInterval(async () => {
     try {
-      const response = await fetchExecution(executionId)
+      const response = await fetchExecution(executionId, resolveExecutionScopeParams())
       syncRuntimeExecution(response.data)
       if (['finished', 'failed', 'cancelled', 'waiting_approval'].includes(response.data.status)) {
         stopRuntimeTracking()
@@ -384,6 +398,7 @@ const submitMockEvent = async () => {
       workflow_id: workflowId.value,
       version: currentRelease.value?.version ?? compileResult.value?.version,
       mode: currentRelease.value ? 'released' : 'draft',
+      dept_id: workflowStore.ownerDeptId,
       event_type: mockEventType.value,
       source: mockSource.value,
       event: {

@@ -66,6 +66,7 @@ const agentNodes: Array<{ type: WorkflowNodeType; label: string; description: st
 
 const controlNodes: Array<{ type: WorkflowNodeType; label: string; description: string; className: string }> = [
   { type: 'condition', label: '条件控制节点', description: '条件判断与分支路由', className: 'border-emerald-300 bg-emerald-50 text-emerald-950' },
+  { type: 'parallel', label: '并行控制节点', description: '在决策后并列推进多个执行智能体', className: 'border-cyan-300 bg-cyan-50 text-cyan-950' },
   { type: 'approval', label: '审批节点', description: '审批挂起与恢复', className: 'border-amber-300 bg-amber-50 text-amber-950' },
   { type: 'wait', label: '等待节点', description: '等待事件或时间', className: 'border-slate-300 bg-slate-50 text-slate-900' },
   { type: 'exception', label: '异常控制节点', description: '异常兜底与风险处理', className: 'border-fuchsia-300 bg-fuchsia-50 text-fuchsia-950' },

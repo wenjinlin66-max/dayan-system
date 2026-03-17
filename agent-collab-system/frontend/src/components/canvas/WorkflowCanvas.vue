@@ -112,6 +112,7 @@ const typeLabels: Record<string, string> = {
   decision_agent: '决策',
   execution_agent: '执行',
   condition: '条件',
+  parallel: '并行',
   approval: '审批',
   wait: '等待',
   exception: '异常',
@@ -149,9 +150,10 @@ const resolveNodeDescription = (node: { type: string; config: Record<string, unk
     const target = Array.isArray(node.config.execution_targets)
       ? (node.config.execution_targets[0] as Record<string, unknown> | undefined)
       : undefined
-    const targetRef = typeof target?.target_ref === 'string' ? target.target_ref : '未配置目标'
-    const operation = typeof target?.operation === 'string' ? target.operation : 'append_row'
-    return `${operation} · ${targetRef}`
+    const targetType = typeof target?.target_type === 'string' ? target.target_type : 'department_chat'
+    const targetRef = typeof target?.target_ref === 'string' && target.target_ref.trim() ? target.target_ref : '自动目标'
+    const operation = typeof target?.operation === 'string' && target.operation.trim() ? target.operation : 'send_report'
+    return `${targetType} · ${operation} · ${targetRef}`
   }
 
   return '点击节点后弹出配置界面'

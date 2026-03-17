@@ -68,6 +68,12 @@
               <ConditionConfigPanel :model-value="selectedNode.config" @update:model-value="updateStructuredConfig" />
             </template>
 
+            <template v-else-if="selectedNode.type === 'parallel'">
+              <div class="rounded-[24px] border border-dashed border-cyan-300 bg-cyan-50 px-4 py-6 text-sm leading-6 text-cyan-900">
+                并行控制节点当前采用最小配置口径：不需要专属表单，直接通过多条下游连线并列挂多个执行智能体即可。若需要进一步补 join / 超时 / 分支策略，再使用下方 JSON 高级配置补充字段。
+              </div>
+            </template>
+
             <template v-else-if="selectedNode.type === 'approval'">
               <ApprovalConfigPanel :model-value="selectedNode.config" @update:model-value="updateStructuredConfig" />
             </template>
@@ -146,6 +152,7 @@ const nodeTypeLabelMap: Record<string, string> = {
   decision_agent: '决策智能体',
   execution_agent: '执行智能体',
   condition: '条件节点',
+  parallel: '并行节点',
   approval: '审批节点',
   wait: '等待节点',
   exception: '异常节点',

@@ -57,13 +57,25 @@ export type WorkflowNodeType =
   | 'decision_agent'
   | 'execution_agent'
   | 'condition'
+  | 'parallel'
   | 'approval'
   | 'wait'
   | 'exception'
 
 export type ExecutionTargetType = 'go_api' | 'department_table'
 
-export interface DepartmentTableTargetConfig {
+export type ExecutionTargetTypeV2 = 'department_chat' | 'department_table' | 'feishu' | 'email' | 'mcp'
+
+export interface ExecutionTargetBaseConfig {
+  target_type: ExecutionTargetTypeV2
+  target_ref?: string
+  provider?: string
+  operation?: string
+  dept_route_mode?: 'current_dept' | 'fixed_dept' | 'derived'
+  fixed_dept_id?: string
+}
+
+export interface DepartmentTableTargetConfig extends ExecutionTargetBaseConfig {
   target_type: 'department_table'
   target_ref: string
   provider: string
@@ -75,14 +87,37 @@ export interface DepartmentTableTargetConfig {
   default_values?: Record<string, string>
 }
 
+export interface DepartmentChatTargetConfig extends ExecutionTargetBaseConfig {
+  target_type: 'department_chat'
+  provider?: 'chat'
+  operation?: 'send_report'
+}
+
+export interface ThirdPartyTargetConfig extends ExecutionTargetBaseConfig {
+  target_type: 'feishu' | 'email' | 'mcp'
+  target_ref: string
+  provider: string
+  operation: string
+}
+
+export type ExecutionTargetConfig = DepartmentTableTargetConfig | DepartmentChatTargetConfig | ThirdPartyTargetConfig
+
+export interface ExecutionChatDeliveryConfig {
+  send_summary?: boolean
+  send_failure_reason?: boolean
+}
+
 export interface ExecutionNodeConfig {
   description?: string
   execution_target_mode?: 'manual' | 'ai_select'
-  execution_targets?: DepartmentTableTargetConfig[]
+  execution_targets?: ExecutionTargetConfig[]
   approval_mode?: 'always' | 'risk_based' | 'never'
   approval_required?: boolean
-  result_delivery?: 'chat' | 'event' | 'monitor'
+  result_delivery?: 'none' | 'chat' | 'event' | 'monitor'
   result_target_dept_id?: string
+  chat_delivery?: ExecutionChatDeliveryConfig
+  result_template?: string
+  failure_delivery?: 'none' | 'chat' | 'event' | 'monitor'
 }
 
 export interface SensorConditionConfig {
