@@ -1,5 +1,5 @@
 import { http } from './client'
-import type { SensorMetadataResponse, WorkflowUiSchema } from '@/types/workflow'
+import type { SensorMetadataResponse, WorkflowDialogTriggerConfig, WorkflowUiSchema } from '@/types/workflow'
 
 export const fetchWorkflowHealth = async () => http.get('/v1/workflows/health')
 export const fetchWorkflows = async (params?: { dept_id?: string; include_all?: boolean }) => http.get('/v1/workflows', { params })
@@ -20,8 +20,17 @@ export const compileWorkflow = async (workflowId: string, payload: { schema_vers
 
 export const publishWorkflow = async (
   workflowId: string,
-  payload: { release_note?: string; category?: string; summary?: string; dept_id?: string },
-) => http.post(`/v1/workflows/${workflowId}/publish`, { release_note: payload.release_note, category: payload.category, summary: payload.summary }, { params: { dept_id: payload.dept_id } })
+  payload: { release_note?: string; category?: string; summary?: string; dept_id?: string; dialog_trigger_config?: WorkflowDialogTriggerConfig },
+) => http.post(
+  `/v1/workflows/${workflowId}/publish`,
+  {
+    release_note: payload.release_note,
+    category: payload.category,
+    summary: payload.summary,
+    dialog_trigger_config: payload.dialog_trigger_config,
+  },
+  { params: { dept_id: payload.dept_id } },
+)
 
 export const fetchWorkflowVersions = async (workflowId: string, params?: { dept_id?: string }) => http.get(`/v1/workflows/${workflowId}/versions`, { params })
 

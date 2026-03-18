@@ -34,6 +34,15 @@ export interface WorkflowUiSchema {
   viewport?: Record<string, unknown>
 }
 
+export interface WorkflowDialogTriggerConfig {
+  summary?: string
+  synonyms?: string[]
+  example_utterances?: string[]
+  allowed_roles?: string[]
+  required_inputs?: string[]
+  input_schema?: Record<string, unknown> | null
+}
+
 export interface WorkflowCompileResult {
   workflow_id: string
   version: number
@@ -207,6 +216,12 @@ export interface DialogNodeConfig {
   intentTag?: string
   responseStyle?: 'guide' | 'confirm' | 'explain'
   memoryProfile?: 'light' | 'standard' | 'deep'
+  triggerSummary?: string
+  triggerSynonyms?: string[]
+  triggerExampleUtterances?: string[]
+  triggerAllowedRoles?: string[]
+  triggerRequiredInputs?: string[]
+  triggerInputSchema?: Record<string, unknown> | null
 }
 
 export interface ConditionNodeConfig {

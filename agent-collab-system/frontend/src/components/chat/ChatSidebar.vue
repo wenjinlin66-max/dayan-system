@@ -82,6 +82,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { useChatSession } from '@/composables/useChatSession'
 import { useChatStore } from '@/store/chat'
+import { formatDateTime } from '@/utils/dateTime'
 import { getDepartmentLabel } from '@/utils/erpDepartments'
 
 const chatStore = useChatStore()
@@ -98,7 +99,7 @@ const historyDialogVisible = ref(false)
 const historyPreviewLimit = 4
 const visibleSessions = computed(() => sessions.value.slice(0, historyPreviewLimit))
 
-const formatTime = (value: string) => new Date(value).toLocaleString('zh-CN', { hour12: false })
+const formatTime = (value: string) => formatDateTime(value)
 
 const handleSelectSession = async (sessionId: string) => {
   await selectSession(sessionId)

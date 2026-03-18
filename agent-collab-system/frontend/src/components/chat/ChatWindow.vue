@@ -1,5 +1,5 @@
 <template>
-  <div class="rounded-[26px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] p-4 min-h-[620px] text-sm text-slate-700 shadow-[0_16px_36px_rgba(148,163,184,0.10)]">
+  <div class="rounded-[26px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] p-4 min-h-[620px] text-sm text-slate-700 shadow-[0_16px_36px_rgba(148,163,184,0.10)] xl:flex xl:min-h-0 xl:h-full xl:flex-col">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-slate-200 bg-slate-50/80 px-4 py-3">
       <div>
         <div class="text-[11px] uppercase tracking-[0.22em] text-slate-500">AI 对话消息流</div>
@@ -11,8 +11,8 @@
       </div>
     </div>
 
-    <div v-if="messages.length === 0" class="flex min-h-[500px] items-center justify-center rounded-[22px] border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-slate-500">发送一条消息，开始当前部门的问答、审批或流程启动。</div>
-    <div v-else class="max-h-[500px] space-y-3 overflow-y-auto pr-1">
+    <div v-if="messages.length === 0" class="flex min-h-[500px] items-center justify-center rounded-[22px] border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-slate-500 xl:flex-1 xl:min-h-0">发送一条消息，开始当前部门的问答、审批或流程启动。</div>
+    <div v-else class="max-h-[500px] space-y-3 overflow-y-auto pr-1 xl:flex-1 xl:max-h-none xl:min-h-0">
       <div
         v-for="message in messages"
         :key="message.message_id"
@@ -64,6 +64,7 @@ import { computed } from 'vue'
 import { useChatSession } from '@/composables/useChatSession'
 import { useChatStore } from '@/store/chat'
 import type { ChatMessage, WorkflowCatalogItem } from '@/types/chat'
+import { formatDateTime } from '@/utils/dateTime'
 import WorkflowParameterCard from './WorkflowParameterCard.vue'
 
 const chatStore = useChatStore()
@@ -74,7 +75,19 @@ const showDeptBadge = (message: ChatMessage) => chatStore.canViewAllDepartments(
 
 const candidateWorkflows = (message: ChatMessage): WorkflowCatalogItem[] => {
   const raw = message.payload?.candidate_workflows
-  return Array.isArray(raw) ? (raw as WorkflowCatalogItem[]) : []
+  if (!Array.isArray(raw)) {
+    return []
+  }
+  const deduped = new Map<string, WorkflowCatalogItem>()
+  for (const item of raw as WorkflowCatalogItem[]) {
+    if (!item?.workflow_id) {
+      continue
+    }
+    if (!deduped.has(item.workflow_id)) {
+      deduped.set(item.workflow_id, item)
+    }
+  }
+  return Array.from(deduped.values())
 }
 
 const missingInputs = (message: ChatMessage): string[] => {
@@ -99,11 +112,7 @@ const formatMessageTime = (message: ChatMessage) => {
   if (!message.created_at) {
     return ''
   }
-  const value = new Date(message.created_at)
-  if (Number.isNaN(value.getTime())) {
-    return ''
-  }
-  return value.toLocaleString('zh-CN', {
+  return formatDateTime(message.created_at, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

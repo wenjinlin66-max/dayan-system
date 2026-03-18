@@ -1,4 +1,6 @@
 import { fetchExecution } from '@/api/executions'
+import { fetchApprovalTasks } from '@/api/approvals'
+import { fetchChatMessages } from '@/api/chat'
 import { useAuthStore } from '@/store/auth'
 import { useChatStore } from '@/store/chat'
 import type { ExecutionStatus } from '@/types/execution'
@@ -33,6 +35,20 @@ export const useExecutionStream = () => {
     chatStore.setStreamFallback(false)
   }
 
+  const refreshApprovalAndMessages = async () => {
+    try {
+      const params = resolveExecutionParams()
+      const approvalRes = await fetchApprovalTasks(params)
+      chatStore.setApprovalTasks(approvalRes.data.items)
+      if (chatStore.currentSessionId) {
+        const messagesRes = await fetchChatMessages(chatStore.currentSessionId, params)
+        chatStore.setMessages(messagesRes.data.items)
+      }
+    } catch {
+      // best effort refresh only
+    }
+  }
+
   const startPolling = (executionId: string) => {
     chatStore.setStreamFallback(true)
     currentPollTimer = window.setInterval(async () => {
@@ -40,7 +56,11 @@ export const useExecutionStream = () => {
         const response = await fetchExecution(executionId, resolveExecutionParams())
         const payload = response.data as ExecutionStatus
         chatStore.setLatestExecution(payload)
+        if (payload.status === 'waiting_approval') {
+          await refreshApprovalAndMessages()
+        }
         if (payload.status === 'finished' || payload.status === 'failed' || payload.status === 'cancelled') {
+          await refreshApprovalAndMessages()
           stop()
         }
       } catch {
@@ -68,11 +88,17 @@ export const useExecutionStream = () => {
     chatStore.setStreamConnected(true)
 
     source.addEventListener('status', (event) => {
-      const payload = JSON.parse((event as MessageEvent).data) as ExecutionStatus
-      chatStore.setLatestExecution(payload)
-      if (payload.status === 'finished' || payload.status === 'failed' || payload.status === 'cancelled') {
-        stop()
-      }
+      void (async () => {
+        const payload = JSON.parse((event as MessageEvent).data) as ExecutionStatus
+        chatStore.setLatestExecution(payload)
+        if (payload.status === 'waiting_approval') {
+          await refreshApprovalAndMessages()
+        }
+        if (payload.status === 'finished' || payload.status === 'failed' || payload.status === 'cancelled') {
+          await refreshApprovalAndMessages()
+          stop()
+        }
+      })()
     })
 
     source.onerror = () => {

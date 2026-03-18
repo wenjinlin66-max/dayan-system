@@ -12,6 +12,7 @@ import {
 } from '@/api/workflows'
 import { useWorkflowStore } from '@/store/workflow'
 import { mapCanvasToDsl } from '@/utils/canvasMapper'
+import type { DialogNodeConfig, WorkflowDialogTriggerConfig, WorkflowNode } from '@/types/workflow'
 
 const extractErrorMessage = (error: unknown) => {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
@@ -27,6 +28,29 @@ const extractErrorMessage = (error: unknown) => {
 export const useWorkflowPublish = () => {
   const workflowStore = useWorkflowStore()
   const canPublish = computed(() => workflowStore.compileResult?.compile_status === 'success' && !workflowStore.compileStale)
+
+  const buildUiSchema = () => mapCanvasToDsl(workflowStore.nodes, workflowStore.edges)
+
+  const findDialogNode = (): WorkflowNode | undefined => workflowStore.nodes.find((node) => node.type === 'dialog_agent')
+
+  const buildDialogTriggerConfig = (): WorkflowDialogTriggerConfig | undefined => {
+    if (workflowStore.workflowCategory !== 'dialog_trigger') {
+      return undefined
+    }
+    const dialogNode = findDialogNode()
+    if (!dialogNode) {
+      return undefined
+    }
+    const config = dialogNode.config as DialogNodeConfig
+    return {
+      summary: typeof config.triggerSummary === 'string' ? config.triggerSummary : '',
+      synonyms: Array.isArray(config.triggerSynonyms) ? config.triggerSynonyms.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [],
+      example_utterances: Array.isArray(config.triggerExampleUtterances) ? config.triggerExampleUtterances.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [],
+      allowed_roles: Array.isArray(config.triggerAllowedRoles) ? config.triggerAllowedRoles.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [],
+      required_inputs: Array.isArray(config.triggerRequiredInputs) ? config.triggerRequiredInputs.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [],
+      input_schema: config.triggerInputSchema && typeof config.triggerInputSchema === 'object' ? config.triggerInputSchema : null,
+    }
+  }
 
   const withActionLock = async <T>(action: 'save' | 'compile' | 'publish' | 'load', runner: () => Promise<T>) => {
     if (workflowStore.isBusy) {
@@ -120,7 +144,7 @@ export const useWorkflowPublish = () => {
         const workflowId = await ensureWorkflow()
         const response = await saveWorkflowDraft(workflowId, {
           name: workflowStore.workflowName,
-          ui_schema: mapCanvasToDsl(workflowStore.nodes, workflowStore.edges),
+          ui_schema: buildUiSchema(),
         }, { dept_id: workflowStore.ownerDeptId })
         workflowStore.setDraftSnapshot(response.data)
         await refreshVersions()
@@ -137,7 +161,7 @@ export const useWorkflowPublish = () => {
         const workflowId = await ensureWorkflow()
         await saveWorkflowDraft(workflowId, {
           name: workflowStore.workflowName,
-          ui_schema: mapCanvasToDsl(workflowStore.nodes, workflowStore.edges),
+          ui_schema: buildUiSchema(),
         }, { dept_id: workflowStore.ownerDeptId })
         const response = await compileWorkflow(workflowId, { dept_id: workflowStore.ownerDeptId })
         workflowStore.setCompileResult(response.data)
@@ -163,7 +187,8 @@ export const useWorkflowPublish = () => {
         const workflowId = await ensureWorkflow()
         const response = await publishWorkflow(workflowId, {
           category: workflowStore.workflowCategory,
-          summary: `${workflowStore.workflowName} 最小闭环流程`,
+          summary: buildDialogTriggerConfig()?.summary || `${workflowStore.workflowName} 最小闭环流程`,
+          dialog_trigger_config: buildDialogTriggerConfig(),
           dept_id: workflowStore.ownerDeptId,
         })
         workflowStore.setCurrentRelease(response.data)

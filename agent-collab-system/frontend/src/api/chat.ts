@@ -7,7 +7,7 @@ export const fetchChatSessions = async (params?: { dept_id?: string; include_all
 export const deleteChatSession = async (sessionId: string, params?: { dept_id?: string; include_all?: boolean }) => http.delete(`/v1/chat/sessions/${sessionId}`, { params })
 
 export const sendChatMessage = async (sessionId: string, content: string, params?: { dept_id?: string; include_all?: boolean }) =>
-  http.post(`/v1/chat/sessions/${sessionId}/messages`, { content, message_type: 'text' }, { params })
+  http.post(`/v1/chat/sessions/${sessionId}/messages`, { content, message_type: 'text' }, { params, timeout: 60000 })
 
 export const fetchChatMessages = async (sessionId: string, params?: { dept_id?: string; include_all?: boolean }) => http.get(`/v1/chat/sessions/${sessionId}/messages`, { params })
 
@@ -23,4 +23,4 @@ export const startWorkflowFromChat = async (
   payload?: { source?: string; note?: string; source_message_id?: string; input_values?: Record<string, unknown> },
   params?: { dept_id?: string; include_all?: boolean },
 ) =>
-  http.post(`/v1/chat/sessions/${sessionId}/workflows/${workflowId}/start`, payload ?? { source: 'catalog' }, { params })
+  http.post(`/v1/chat/sessions/${sessionId}/workflows/${workflowId}/start`, payload ?? { source: 'catalog' }, { params, timeout: 60000 })

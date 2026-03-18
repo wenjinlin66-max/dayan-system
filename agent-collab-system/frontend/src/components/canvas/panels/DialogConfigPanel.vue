@@ -30,11 +30,43 @@
         </div>
       </div>
     </section>
+
+    <section class="rounded-2xl border border-white/80 bg-white/92 p-4 shadow-sm shadow-violet-100/60">
+      <div class="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">对话触发规则</div>
+      <div class="space-y-3">
+        <div>
+          <div class="mb-1 text-sm font-medium text-slate-700">触发摘要</div>
+          <el-input v-model="triggerSummary" type="textarea" :rows="3" placeholder="例如：用户在对话框中发起补货申请，系统先补齐参数，再启动补货执行流程。" />
+        </div>
+        <div>
+          <div class="mb-1 text-sm font-medium text-slate-700">示例话术（每行一条）</div>
+          <el-input v-model="triggerExampleUtterancesText" type="textarea" :rows="4" placeholder="帮我发起补货申请&#10;给供应部启动库存补货流程&#10;我要提交补货单" />
+        </div>
+        <div>
+          <div class="mb-1 text-sm font-medium text-slate-700">同义词 / 检索关键词（每行一条）</div>
+          <el-input v-model="triggerSynonymsText" type="textarea" :rows="3" placeholder="补货&#10;补库存&#10;库存申请" />
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div>
+            <div class="mb-1 text-sm font-medium text-slate-700">允许角色（每行一条，可留空）</div>
+            <el-input v-model="triggerAllowedRolesText" type="textarea" :rows="3" placeholder="manager&#10;ceo" />
+          </div>
+          <div>
+            <div class="mb-1 text-sm font-medium text-slate-700">必填输入字段（每行一条）</div>
+            <el-input v-model="triggerRequiredInputsText" type="textarea" :rows="3" placeholder="item_id&#10;quantity&#10;reason" />
+          </div>
+        </div>
+        <div>
+          <div class="mb-1 text-sm font-medium text-slate-700">输入 Schema（JSON，可选）</div>
+          <el-input v-model="triggerInputSchemaText" type="textarea" :rows="7" placeholder='{"properties":{"item_id":{"title":"物料编码","type":"string"},"quantity":{"title":"补货数量","type":"number"}}}' />
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import type { DialogNodeConfig } from '@/types/workflow'
 
@@ -61,6 +93,12 @@ const currentConfig = computed<DialogNodeConfig>(() => {
     intentTag: config.intentTag ?? '',
     responseStyle: config.responseStyle ?? 'guide',
     memoryProfile: config.memoryProfile ?? 'standard',
+    triggerSummary: typeof config.triggerSummary === 'string' ? config.triggerSummary : '',
+    triggerSynonyms: Array.isArray(config.triggerSynonyms) ? config.triggerSynonyms.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [],
+    triggerExampleUtterances: Array.isArray(config.triggerExampleUtterances) ? config.triggerExampleUtterances.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [],
+    triggerAllowedRoles: Array.isArray(config.triggerAllowedRoles) ? config.triggerAllowedRoles.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [],
+    triggerRequiredInputs: Array.isArray(config.triggerRequiredInputs) ? config.triggerRequiredInputs.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [],
+    triggerInputSchema: config.triggerInputSchema && typeof config.triggerInputSchema === 'object' ? config.triggerInputSchema : null,
   }
 })
 
@@ -89,5 +127,59 @@ const responseStyle = computed({
 const memoryProfile = computed({
   get: () => currentConfig.value.memoryProfile ?? 'standard',
   set: (value: DialogNodeConfig['memoryProfile']) => updateConfig({ memoryProfile: value }),
+})
+
+const splitLines = (value: string) => value
+  .split(/\r?\n|,/)
+  .map((item) => item.trim())
+  .filter((item) => item.length > 0)
+
+const triggerSummary = computed({
+  get: () => currentConfig.value.triggerSummary ?? '',
+  set: (value: string) => updateConfig({ triggerSummary: value }),
+})
+
+const triggerSynonymsText = computed({
+  get: () => (currentConfig.value.triggerSynonyms ?? []).join('\n'),
+  set: (value: string) => updateConfig({ triggerSynonyms: splitLines(value) }),
+})
+
+const triggerExampleUtterancesText = computed({
+  get: () => (currentConfig.value.triggerExampleUtterances ?? []).join('\n'),
+  set: (value: string) => updateConfig({ triggerExampleUtterances: splitLines(value) }),
+})
+
+const triggerAllowedRolesText = computed({
+  get: () => (currentConfig.value.triggerAllowedRoles ?? []).join('\n'),
+  set: (value: string) => updateConfig({ triggerAllowedRoles: splitLines(value) }),
+})
+
+const triggerRequiredInputsText = computed({
+  get: () => (currentConfig.value.triggerRequiredInputs ?? []).join('\n'),
+  set: (value: string) => updateConfig({ triggerRequiredInputs: splitLines(value) }),
+})
+
+const triggerInputSchemaText = ref('{}')
+
+watch(
+  () => currentConfig.value.triggerInputSchema,
+  (value) => {
+    triggerInputSchemaText.value = JSON.stringify(value ?? {}, null, 2)
+  },
+  { immediate: true, deep: true },
+)
+
+watch(triggerInputSchemaText, (value) => {
+  const normalized = value.trim()
+  if (!normalized) {
+    updateConfig({ triggerInputSchema: null })
+    return
+  }
+  try {
+    const parsed = JSON.parse(normalized) as Record<string, unknown>
+    updateConfig({ triggerInputSchema: parsed })
+  } catch {
+    // Persist only valid JSON while allowing the user to keep editing.
+  }
 })
 </script>
