@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from uuid import uuid4
 from typing import cast
 
@@ -62,7 +62,7 @@ class ChatService:
             session_id=session.id,
             title=session.title or "新会话",
             dept_id=session.dept_id,
-            last_message_at=session.last_message_at.isoformat() if session.last_message_at else None,
+            last_message_at=self._serialize_datetime(session.last_message_at),
         )
 
     async def delete_session(self, session_id: str, *, dept_id: str, user_id: str) -> None:
@@ -77,8 +77,11 @@ class ChatService:
             raise ValueError("CHAT_SESSION_NOT_FOUND")
         await self.repository.session.commit()
 
-    async def list_catalog(self, *, dept_id: str | None, category: str | None = None, include_all: bool = False) -> WorkflowCatalogResponse:
-        entries = await self.repository.list_catalog_in_scope(dept_id=dept_id, category=category, include_all=include_all)
+    async def list_catalog(self, *, dept_id: str | None, category: str | None = None, include_all: bool = False, roles: list[str] | None = None) -> WorkflowCatalogResponse:
+        effective_category = category or "dialog_trigger"
+        entries = await self.repository.list_catalog_in_scope(dept_id=dept_id, category=effective_category, include_all=include_all)
+        entries = self._dedupe_registry_entries(entries)
+        entries = self._filter_entries_by_roles(entries, roles or [])
         deduped: list[WorkflowRegistry] = []
         seen_workflow_ids: set[str] = set()
         for entry in entries:
@@ -97,10 +100,11 @@ class ChatService:
         roles: list[str],
     ) -> ChatRouteResponse:
         decision = await self._route_internal(payload.content, dept_id=dept_id, user_id=user_id, roles=roles, session_id=payload.session_id)
+        deduped_candidates = self._dedupe_registry_entries(decision.candidates)
         return ChatRouteResponse(
             route_type=decision.route_type,
             needs_confirmation=decision.needs_confirmation,
-            candidate_workflows=[self._catalog_item(entry, None) for entry in decision.candidates],
+            candidate_workflows=[self._catalog_item(entry, None) for entry in deduped_candidates],
             missing_inputs=decision.missing_inputs,
             execution_id=decision.execution_id,
             reply=decision.reply,
@@ -172,9 +176,10 @@ class ChatService:
         _ = await self.repository.create_message(user_message)
 
         decision = await self._route_internal(payload.content, dept_id=dept_id, user_id=user_id, roles=roles, session_id=session_id)
+        deduped_candidates = self._dedupe_registry_entries(decision.candidates)
         assistant_payload: dict[str, object] = {
             "route_type": decision.route_type,
-            "candidate_workflows": [self._catalog_item(entry, None).model_dump() for entry in decision.candidates],
+            "candidate_workflows": [self._catalog_item(entry, None).model_dump() for entry in deduped_candidates],
             "missing_inputs": decision.missing_inputs,
         }
         assistant_message = ChatMessage(
@@ -194,7 +199,7 @@ class ChatService:
             message_id=assistant_message.id,
             session_id=session_id,
             dept_id=assistant_message.dept_id,
-            created_at=assistant_message.created_at.isoformat() if assistant_message.created_at else None,
+            created_at=self._serialize_datetime(assistant_message.created_at),
             role=assistant_message.role,
             content=assistant_message.content,
             route_type=decision.route_type,
@@ -211,7 +216,7 @@ class ChatService:
                     message_id=message.id,
                     session_id=message.session_id,
                     dept_id=message.dept_id,
-                    created_at=message.created_at.isoformat() if message.created_at else None,
+                    created_at=self._serialize_datetime(message.created_at),
                     role=message.role,
                     content=message.content,
                     route_type=cast(str | None, (message.payload or {}).get("route_type") if message.payload else None),
@@ -234,7 +239,7 @@ class ChatService:
                     message_id=message.id,
                     session_id=message.session_id,
                     dept_id=message.dept_id,
-                    created_at=message.created_at.isoformat() if message.created_at else None,
+                    created_at=self._serialize_datetime(message.created_at),
                     role=message.role,
                     content=message.content,
                     route_type=cast(str | None, (message.payload or {}).get("route_type") if message.payload else None),
@@ -252,10 +257,18 @@ class ChatService:
                 session_id=item.id,
                 title=item.title or "新会话",
                 dept_id=item.dept_id,
-                last_message_at=item.last_message_at.isoformat() if item.last_message_at else None,
+                last_message_at=self._serialize_datetime(item.last_message_at),
             )
             for item in sessions
         ]
+
+    @staticmethod
+    def _serialize_datetime(value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat()
 
     async def start_workflow_from_selection(
         self,
@@ -315,7 +328,10 @@ class ChatService:
     ) -> ChatMessageResponse:
         session_id = session.id
 
-        entries = await self.repository.list_catalog(dept_id)
+        entries = self._filter_entries_by_roles(
+            self._dedupe_registry_entries(await self.repository.list_catalog(dept_id, category="dialog_trigger")),
+            roles,
+        )
         selected = next((entry for entry in entries if entry.workflow_id == workflow_id), None)
         if selected is None:
             raise ValueError("WORKFLOW_NOT_FOUND")
@@ -430,10 +446,13 @@ class ChatService:
                 missing_inputs=[],
             )
 
-        entries = await self.repository.list_catalog(dept_id)
+        entries = self._dedupe_registry_entries(await self.repository.list_catalog(dept_id, category="dialog_trigger"))
+        entries = self._filter_entries_by_roles(entries, roles)
         scored = self._score_candidates(normalized, entries)
         command_keywords = ("启动", "执行", "发起", "运行", "触发", "帮我")
-        is_command_like = any(keyword in normalized for keyword in command_keywords)
+        question_hints = ("什么", "怎么", "为何", "为什么", "吗", "？", "?")
+        is_question_like = any(keyword in normalized for keyword in question_hints)
+        is_command_like = (any(keyword in normalized for keyword in command_keywords) or any(score >= 2 for _, score in scored)) and not is_question_like
         if is_command_like and scored:
             top_score = scored[0][1]
             top_entries = [entry for entry, score in scored if score == top_score and score > 0]
@@ -584,23 +603,55 @@ class ChatService:
     @staticmethod
     def _score_candidates(content: str, entries: list[WorkflowRegistry]) -> list[tuple[WorkflowRegistry, int]]:
         tokens = [token for token in content.replace("，", " ").replace("。", " ").split() if token]
+        normalized_content = content.strip().lower()
         scored: list[tuple[WorkflowRegistry, int]] = []
         for entry in entries:
             haystacks = [entry.title, entry.summary]
             if entry.synonyms:
                 haystacks.extend(entry.synonyms)
+            if entry.example_utterances:
+                haystacks.extend(entry.example_utterances)
             score = 0
             for token in tokens:
                 if any(token in item for item in haystacks):
                     score += 1
-            if not tokens and any(keyword in content for keyword in (entry.title, entry.summary)):
-                score += 1
+            for item in haystacks:
+                normalized_item = item.strip().lower()
+                if normalized_item and (normalized_item in normalized_content or normalized_content in normalized_item):
+                    score += 1
             if entry.title in content:
                 score += 2
+            if entry.example_utterances and any(example and example in content for example in entry.example_utterances):
+                score += 3
             if score > 0:
                 scored.append((entry, score))
         scored.sort(key=lambda item: item[1], reverse=True)
         return scored
+
+    @staticmethod
+    def _filter_entries_by_roles(entries: list[WorkflowRegistry], roles: list[str]) -> list[WorkflowRegistry]:
+        role_set = {role.strip() for role in roles if role.strip()}
+        filtered: list[WorkflowRegistry] = []
+        for entry in entries:
+            if not entry.allowed_roles:
+                filtered.append(entry)
+                continue
+            allowed = {role.strip() for role in entry.allowed_roles if isinstance(role, str) and role.strip()}
+            if not allowed or allowed.intersection(role_set):
+                filtered.append(entry)
+        return filtered
+
+    @staticmethod
+    def _dedupe_registry_entries(entries: list[WorkflowRegistry]) -> list[WorkflowRegistry]:
+        deduped: list[WorkflowRegistry] = []
+        seen_workflow_ids: set[str] = set()
+        sorted_entries = sorted(entries, key=lambda item: (item.workflow_version, item.updated_at), reverse=True)
+        for entry in sorted_entries:
+            if entry.workflow_id in seen_workflow_ids:
+                continue
+            seen_workflow_ids.add(entry.workflow_id)
+            deduped.append(entry)
+        return deduped
 
     @staticmethod
     def _catalog_item(entry: WorkflowRegistry, confidence: float | None) -> WorkflowCatalogItem:

@@ -249,7 +249,7 @@ class ExecutionService:
         workflow = await self.workflow_repository.get_workflow(workflow_id)
         if workflow is None:
             raise ValueError("WORKFLOW_NOT_FOUND")
-        effective_dept_id = None if include_all else dept_id
+        effective_dept_id = None if include_all and not dept_id else dept_id
         runs = await self.execution_repository.list_runs_by_workflow(workflow_id, dept_id=effective_dept_id)
         return WorkflowExecutionHistoryResponse(
             workflow_id=workflow.id,
@@ -554,13 +554,13 @@ class ExecutionService:
         runtime_state: RuntimeState | None = None,
     ) -> None:
         repository = ChatRepository(self.execution_repository.session)
-        effective_session_id = await self._resolve_result_session_id(
+        effective_session_ids = await self._resolve_result_session_ids(
             repository,
             session_id=session_id,
             dept_id=dept_id,
             user_id=user_id,
         )
-        if not effective_session_id:
+        if not effective_session_ids:
             return
         content = self._build_execution_message_content(
             workflow_id=workflow_id,
@@ -570,35 +570,44 @@ class ExecutionService:
             runtime_state=runtime_state,
         )
         chat_delivery = self._extract_chat_delivery(runtime_state)
-        _ = await repository.append_assistant_message(
-            session_id=effective_session_id,
-            dept_id=dept_id,
-            content=content,
-            payload={
-                "message_kind": "execution_result",
-                "execution_id": execution_id,
-                "workflow_id": workflow_id,
-                "status": status,
-                "current_node": current_node,
-                "error_summary": error_summary,
-                "chat_delivery": chat_delivery,
-            },
-            related_execution_id=execution_id,
-        )
+        for effective_session_id in effective_session_ids:
+            _ = await repository.append_assistant_message(
+                session_id=effective_session_id,
+                dept_id=dept_id,
+                content=content,
+                payload={
+                    "message_kind": "execution_result",
+                    "execution_id": execution_id,
+                    "workflow_id": workflow_id,
+                    "status": status,
+                    "current_node": current_node,
+                    "error_summary": error_summary,
+                    "chat_delivery": chat_delivery,
+                },
+                related_execution_id=execution_id,
+            )
 
-    async def _resolve_result_session_id(
+    async def _resolve_result_session_ids(
         self,
         repository: ChatRepository,
         *,
         session_id: str | None,
         dept_id: str,
         user_id: str,
-    ) -> str | None:
+    ) -> list[str]:
+        session_ids: list[str] = []
         if isinstance(session_id, str) and session_id:
             session = await repository.get_session(session_id)
             if session is not None and session.dept_id == dept_id:
-                return session.id
-        return await self._ensure_department_chat_session(repository, dept_id=dept_id, user_id=user_id)
+                session_ids.append(session.id)
+        main_sessions = await repository.list_department_main_sessions(dept_id)
+        for session in main_sessions:
+            if session.id not in session_ids:
+                session_ids.append(session.id)
+        if session_ids:
+            return session_ids
+        ensured_session_id = await self._ensure_department_chat_session(repository, dept_id=dept_id, user_id=user_id)
+        return [ensured_session_id] if ensured_session_id else []
 
     @staticmethod
     def _build_execution_message_content(

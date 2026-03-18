@@ -6,6 +6,15 @@ from pydantic import BaseModel, Field
 WorkflowTriggerType = Literal["dialog_trigger", "event_trigger", "schedule_trigger"]
 
 
+class WorkflowDialogTriggerConfig(BaseModel):
+    summary: str = ""
+    synonyms: list[str] = Field(default_factory=list)
+    example_utterances: list[str] = Field(default_factory=list)
+    allowed_roles: list[str] = Field(default_factory=list)
+    required_inputs: list[str] = Field(default_factory=list)
+    input_schema: dict[str, object] | None = None
+
+
 class WorkflowCreateRequest(BaseModel):
     name: str = Field(min_length=1)
     code: str = Field(min_length=1)
@@ -28,6 +37,7 @@ class WorkflowPublishRequest(BaseModel):
     release_note: str | None = None
     category: WorkflowTriggerType = "dialog_trigger"
     summary: str = ""
+    dialog_trigger_config: WorkflowDialogTriggerConfig | None = None
 
 
 class WorkflowResponse(BaseModel):

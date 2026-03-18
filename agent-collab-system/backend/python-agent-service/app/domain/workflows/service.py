@@ -15,6 +15,7 @@ from app.schemas.workflow import (
     WorkflowCompileRequest,
     WorkflowCreateRequest,
     WorkflowDraftUpdateRequest,
+    WorkflowDialogTriggerConfig,
     WorkflowPublishRequest,
     WorkflowResponse,
     WorkflowTriggerType,
@@ -175,6 +176,9 @@ class WorkflowService:
         if draft.compile_status != "success" or draft.execution_dag is None:
             raise ValueError("WORKFLOW_NOT_COMPILED")
 
+        dialog_trigger_config = self._resolve_dialog_trigger_config(draft.ui_schema, payload)
+
+        await self.repository.deactivate_registry_entries(workflow_id)
         await self.repository.clear_current_release_flags(workflow_id)
         await self.repository.update_version(
             draft.id,
@@ -196,12 +200,12 @@ class WorkflowService:
             dept_id=dept_id,
             category=payload.category,
             title=workflow.name,
-            summary=payload.summary or f"{workflow.name} workflow",
-            synonyms=None,
-            example_utterances=None,
-            allowed_roles=None,
-            required_inputs=None,
-            input_schema=None,
+            summary=dialog_trigger_config.summary or payload.summary or f"{workflow.name} workflow",
+            synonyms=dialog_trigger_config.synonyms or None,
+            example_utterances=dialog_trigger_config.example_utterances or None,
+            allowed_roles=dialog_trigger_config.allowed_roles or None,
+            required_inputs=dialog_trigger_config.required_inputs or None,
+            input_schema=dialog_trigger_config.input_schema,
             approval_policy="risk_based",
             risk_level="medium",
             output_contract=None,
@@ -241,7 +245,10 @@ class WorkflowService:
         )
 
     async def list_workflows(self, *, dept_id: str | None, include_all: bool = False) -> list[WorkflowResponse]:
-        workflows = await self.repository.list_workflows() if include_all else await self.repository.list_workflows_by_dept(dept_id)
+        if include_all:
+            workflows = await self.repository.list_workflows()
+        else:
+            workflows = await self.repository.list_workflows_by_dept(dept_id or "")
         responses: list[WorkflowResponse] = []
         for workflow in workflows:
             registry = await self.repository.get_current_registry_entry(workflow.id)
@@ -282,6 +289,38 @@ class WorkflowService:
         if value in {"dialog_trigger", "event_trigger", "schedule_trigger"}:
             return cast(WorkflowTriggerType, value)
         return "dialog_trigger"
+
+    @staticmethod
+    def _resolve_dialog_trigger_config(ui_schema: dict[str, object], payload: WorkflowPublishRequest) -> WorkflowDialogTriggerConfig:
+        if payload.dialog_trigger_config is not None:
+            return payload.dialog_trigger_config
+
+        raw_nodes = ui_schema.get("nodes")
+        if isinstance(raw_nodes, list):
+            for raw_node in raw_nodes:
+                if not isinstance(raw_node, dict):
+                    continue
+                if raw_node.get("type") != "dialog_agent":
+                    continue
+                raw_config = raw_node.get("config")
+                if not isinstance(raw_config, dict):
+                    continue
+                return WorkflowDialogTriggerConfig(
+                    summary=str(raw_config.get("triggerSummary") or payload.summary or ""),
+                    synonyms=WorkflowService._to_string_list(raw_config.get("triggerSynonyms")),
+                    example_utterances=WorkflowService._to_string_list(raw_config.get("triggerExampleUtterances")),
+                    allowed_roles=WorkflowService._to_string_list(raw_config.get("triggerAllowedRoles")),
+                    required_inputs=WorkflowService._to_string_list(raw_config.get("triggerRequiredInputs")),
+                    input_schema=cast(dict[str, object] | None, raw_config.get("triggerInputSchema") if isinstance(raw_config.get("triggerInputSchema"), dict) else None),
+                )
+
+        return WorkflowDialogTriggerConfig(summary=payload.summary)
+
+    @staticmethod
+    def _to_string_list(value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
     @staticmethod
     def _to_version_response(version: WorkflowVersion) -> WorkflowVersionResponse:

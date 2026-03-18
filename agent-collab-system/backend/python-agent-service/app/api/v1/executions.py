@@ -111,6 +111,7 @@ async def get_execution(
 @router.get("/workflow/{workflow_id}/history", response_model=WorkflowExecutionHistoryResponse)
 async def get_workflow_execution_history(
     workflow_id: str,
+    dept_id: str | None = None,
     include_all: bool = False,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
@@ -118,7 +119,8 @@ async def get_workflow_execution_history(
     service = build_service(session)
     try:
         scoped_all = include_all and "ceo" in context.roles
-        return await service.list_workflow_history(workflow_id, dept_id=context.dept_id, include_all=scoped_all)
+        scope_dept_id = dept_id if scoped_all else context.dept_id
+        return await service.list_workflow_history(workflow_id, dept_id=scope_dept_id, include_all=scoped_all)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

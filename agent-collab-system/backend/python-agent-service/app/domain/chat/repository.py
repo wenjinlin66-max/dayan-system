@@ -43,6 +43,18 @@ class ChatRepository:
         )
         return list(result.scalars().all())
 
+    async def list_department_main_sessions(self, dept_id: str) -> list[ChatSession]:
+        result = await self.session.execute(
+            select(ChatSession)
+            .where(
+                ChatSession.dept_id == dept_id,
+                ChatSession.status == "active",
+                ChatSession.title == "当前部门主对话框",
+            )
+            .order_by(ChatSession.last_message_at.desc().nullslast(), ChatSession.created_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def list_sessions_in_scope(
         self,
         *,

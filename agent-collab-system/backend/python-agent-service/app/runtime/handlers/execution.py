@@ -444,7 +444,7 @@ class ExecutionNodeHandler:
             return False
         if approval_mode == "always":
             return True
-        return (context.risk_level or "").lower() in {"medium", "high"}
+        return (context.risk_level or "").lower() in {"high"}
 
     @staticmethod
     def _is_approval_granted_for_node(state: RuntimeState, node_id: str) -> bool:

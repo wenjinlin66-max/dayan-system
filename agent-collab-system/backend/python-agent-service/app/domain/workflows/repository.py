@@ -84,6 +84,13 @@ class WorkflowRepository:
             .values(is_current_release=False)
         )
 
+    async def deactivate_registry_entries(self, workflow_id: str) -> None:
+        await self.session.execute(
+            update(WorkflowRegistry)
+            .where(WorkflowRegistry.workflow_id == workflow_id, WorkflowRegistry.status == "active")
+            .values(status="inactive")
+        )
+
     async def upsert_registry_entry(self, entry: WorkflowRegistry) -> WorkflowRegistry:
         existing = await self.get_registry_entry(entry.workflow_id, entry.workflow_version)
         if existing is None:

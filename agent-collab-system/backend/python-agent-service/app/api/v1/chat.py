@@ -121,7 +121,7 @@ async def get_workflow_catalog(
     service = build_service(session)
     scoped_all = include_all and "ceo" in context.roles
     scope_dept_id = dept_id if scoped_all else context.dept_id
-    return await service.list_catalog(dept_id=scope_dept_id, category=category, include_all=scoped_all)
+    return await service.list_catalog(dept_id=scope_dept_id, category=category, include_all=scoped_all, roles=context.roles)
 
 
 @router.post("/route", response_model=ChatRouteResponse)
