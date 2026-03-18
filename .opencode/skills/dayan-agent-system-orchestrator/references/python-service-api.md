@@ -33,12 +33,17 @@ Python 服务对外提供 5 类能力：
 ### 2.3 Chat API
 - `POST /api/v1/chat/sessions`
 - `GET /api/v1/chat/sessions`
+- `DELETE /api/v1/chat/sessions/:session_id`
 - `POST /api/v1/chat/sessions/:session_id/messages`
 - `GET /api/v1/chat/sessions/:session_id/messages`
 - `GET /api/v1/chat/sessions/:session_id/approvals`
 - `GET /api/v1/chat/workflows/catalog`
 - `POST /api/v1/chat/route`
 - `POST /api/v1/chat/sessions/:session_id/workflows/:workflow_id/start`
+
+### 2.6 Auth API
+- `POST /api/v1/auth/login`
+- `GET /api/v1/auth/me`
 
 ### 2.4 Monitor API
 - `GET /api/v1/monitor/executions`
@@ -106,6 +111,12 @@ Python 服务对外提供 5 类能力：
 - `chat/workflows/catalog`：返回当前部门与当前账号可见的 workflow 目录
 - `chat/route`：返回 `ask / approve / command` 的路由结果，不直接绕过 registry 执行 workflow
 - `chat/sessions/:session_id/workflows/:workflow_id/start`：用于“目录点击启动”或“候选 workflow 二次确认后启动”；若 workflow 声明了 `required_inputs` 且请求未补齐，则先回写参数补齐消息，不直接创建 execution
+- `chat/workflows/catalog` 当前默认只返回 `dialog_trigger` 类型且当前角色可见的 workflow；事件型、定时型流程不作为 chat 直接启动对象暴露
+- `chat/route` 当前应优先消费 workflow registry 中的 `summary / synonyms / example_utterances / allowed_roles / required_inputs / input_schema`，而不是只靠标题关键词硬匹配
+- `chat` 触发 execution 时，当前最小标准上下文为：`trigger.type=chat`、`trigger.session_id`、`trigger.message_id`、`dept_id`、`operator`、`input.message`
+- `DELETE /api/v1/chat/sessions/:session_id` 当前已落地，用于删除历史会话及其消息；CEO 作用域下同样走 `include_all + dept_id` 口径做范围校验
+- `POST /api/v1/chat/sessions/:session_id/messages` 与 `POST /api/v1/chat/sessions/:session_id/workflows/:workflow_id/start` 当前前端会单独使用 60 秒请求超时，降低“前端先超时，但后端仍继续执行”的假失败提示频率
+- chat route / chat start 当前都按 `workflow_id` 去重，并优先消费最新 `workflow_registry` 条目，避免同一条 dialog workflow 因历史 active 版本残留而在对话框里出现多个同名候选
 
 ### 6.1.1 workflow 目录返回字段补充
 - `required_inputs`：当前 workflow 启动前必须补齐的字段名列表
@@ -136,6 +147,8 @@ Python 服务对外提供 5 类能力：
 - 前端默认不应再固定写死容易重复的 demo code，而应生成新的草稿编码或提示用户调整编码
 - `POST /api/v1/workflows` 当前允许显式传入 `owner_dept_id`，用于在制作区选择 workflow 归属部门
 - `GET /api/v1/workflows` 当前支持 `include_all=true` 的演示期全量查看口径，供查看区实现“部门 → 触发逻辑”两层分组；正式账号权限收口后再切回严格按账号/部门控制
+- `POST /api/v1/workflows/{workflow_id}/publish` 当前当分类为 `dialog_trigger` 时，允许一并提交 `dialog_trigger_config`，用于把对话触发元数据写入 `workflow_registry`
+- 若前端未在 publish 请求体显式传 `dialog_trigger_config`，后端当前会回退读取草稿中的 `dialog_agent.config`（`triggerSummary / triggerSynonyms / triggerExampleUtterances / triggerAllowedRoles / triggerRequiredInputs / triggerInputSchema`）
 
 ## 8. Execution API 当前行为补充
 - `POST /api/v1/executions/start` 当前阶段会在创建 execution 后立即触发一轮最小 runtime 执行，而不是只生成 `running` 初始记录
@@ -159,6 +172,7 @@ Python 服务对外提供 5 类能力：
   - `GET /api/v1/auth/me`：基于 bearer token 返回当前身份上下文
 - `get_request_context` 当前优先从 `Authorization: Bearer <token>` 解析 `user_id / dept_id / display_name / roles`；仅在未登录时才回退到旧的 header 兼容路径
 - `GET /api/v1/executions/{execution_id}/stream` 当前已支持 `access_token` query 参数，解决前端 `EventSource` 不能发送 Authorization header 的问题
+- `GET /api/v1/executions/workflow/{workflow_id}/history` 当前已支持 `include_all + dept_id` 组合：workflow 查看区可继续看全量历史；对话区则按当前 chat scope（普通部门 / CEO 全局 / CEO 聚焦部门）查询部门级历史
 - `GET /api/v1/executions/workflow/{workflow_id}/history?include_all=true` 与 `GET /api/v1/workflows?include_all=true` 当前均已增加 CEO 角色门禁，普通账号不能用 crafted request 越权看全部门
 - CEO 单部门查看当前通过 `include_all=true + dept_id=<目标部门>` 工作：`/v1/chat/sessions`、`/v1/chat/sessions/{id}/messages`、`/v1/chat/workflows/catalog`、`/v1/approvals`、`/v1/executions/{id}` 与 `/v1/executions/{id}/stream` 都已支持这种 CEO 聚焦部门口径
 - chat workflow 目录当前在 service 层按 `workflow_id` 去重，避免 `workflow_registry` 中历史版本/重复有效行导致 CEO 目录重复显示同一 workflow 多次
@@ -172,6 +186,7 @@ Python 服务对外提供 5 类能力：
 
 ### 8.2 智能体 runtime 当前行为
 - `dialog_agent` 当前会根据节点配置中的 `promptHint / intentTag / responseStyle / memoryProfile` 调用统一 `LLMClient` 生成节点级对话回复，并把结果写入 `dialog_outputs` 与 context memory；`dialog_outputs` 当前至少包含 `message / reply / reply_source / llm_enabled / fallback_reason`
+- `dialog_agent` 当前同时承担“对话型 workflow 入口节点”的配置事实源：触发摘要、示例话术、同义词、允许角色、必填输入与输入 schema 在编辑态存放于 `dialog_agent.config`，发布时再抽取进 `workflow_registry`
 - `sensor_agent` 会将标准化后的感知结果写入 `sensor_outputs` 与 context memory，并记录 `source_matched / condition_matched / triggered / sensor_event`
 - `decision_agent` 会输出统一结构：`decision_mode / decision_summary / decision_payload / risk_level / recommended_actions / explanation / citations`
 - `decision_agent.rule` 当前会读取 `rule_set_ref / rule_config`，输出可直接被下游执行节点消费的严重度、缺口与推荐动作

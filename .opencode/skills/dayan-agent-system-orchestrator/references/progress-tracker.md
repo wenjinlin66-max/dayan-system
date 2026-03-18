@@ -106,6 +106,10 @@
 - 业务表格区被动触发本轮已按真实业务口径修正：不再按当前登录用户部门筛 workflow，而是扫描所有 active workflow 按感知配置匹配；命中后使用 workflow 自身 `owner_dept_id` 启动 execution，并将结果继续回到该 workflow 所属部门对话框
 - 对话工作台本轮已补两个收尾问题：`ChatMessageResponse` 当前会稳定返回 `created_at`，`ChatWindow.vue` 消息头已显示时间；同时 CEO 在聚焦具体部门时，“发送消息 / 从 chat 启动 workflow” 已统一走 `include_all + dept_id` scope 链，不再在写操作上报 404
 - 前端认证本轮已增加 401 自动失效处理：bearer 过期或无效时会清空本地登录态并自动跳回 `/login`，不再把未授权状态伪装成“页面空列表”
+- 本轮已按对话型智能体正确方向继续推进：对话触发规则已从 workflow 画布顶部收回到 `dialog_agent` 节点配置面板；`dialog_trigger` workflow 当前通过 `dialog_agent.config` 正式配置 `summary / synonyms / example_utterances / allowed_roles / required_inputs / input_schema`，并在发布时写入 `workflow_registry`
+- chat route 当前已改为只对 `dialog_trigger` workflow 做正式选流，并消费 registry 的 `summary / synonyms / example_utterances / allowed_roles / required_inputs / input_schema`；目录展示与目录直接启动也已同步按 `allowed_roles` 收口，不再把事件/定时流程混进对话直接启动目录
+- 对话区本轮继续收尾并补齐多项明确问题：chat 主链时间展示当前统一走 `utils/dateTime.ts` 并固定按 `Asia/Shanghai` 输出；workflow 历史接口已支持 `include_all + dept_id` 组合，对话区与查看区的历史口径已对齐；dialog-trigger workflow 发布时会先失活旧 registry 条目，chat route / chat start / 候选按钮渲染都已补 workflow 去重；chat send/start 请求已单独放宽到 60s timeout；执行结果当前会补发到同部门所有“当前部门主对话框”会话
+- 对话工作台当前布局已收口为“左侧身份/会话、中间 AI 主对话区、右侧部门流程目录 + 中心工作台”，其中中心工作台只承接审批任务与执行结果查看，不再作为 workflow 启动主入口
 
 ## 进行中模块
 - 感知型智能体详细设计（数据库实时感知优先）
@@ -116,12 +120,14 @@
 - `parallel` 控制节点完整 fork/join 语义与更强分支恢复能力
 - 对话型智能体详细设计（部门化路由、workflow 目录、选流与触发主链）
 - 对话型智能体详细设计（部门对话框消息回流、审批与执行结果在消息流中的呈现细化）
+- 对话型智能体对话触发工作流当前已进入“主链可用、参数抽取待增强”阶段：registry 元数据、候选检索、角色过滤、缺参补齐已接通，但自然语言参数自动抽取仍待继续深化
 - 执行型 chat-only / result_template / failure_delivery 细节当前已落到运行态与配置面板，但失败态模板与更多第三方目标（feishu/email/mcp）仍待继续扩展
 - 监控型智能体详细设计（独立监控工作台、非画布节点）
 - 独立 Mock 业务库与临时业务表格测试工作台详细设计
 - 控制节点详细设计（定义先行，开发后置）
 - workflow 部门化与执行历史查看能力已进入“功能完成，等待权限/分页/竞态等加固”阶段
 - 本地运行环境治理（旧监听、端口冲突、热重载不一致）仍待继续收口
+- dialog-trigger workflow 当前已进入“主链可用、输入值校验仍待加固”阶段：虽然缺参提示、最新版本去重与启动超时治理已落地，但若 decision 输出继续依赖默认兜底值，仍可能把 `unknown-item` 一类脏值写入测试业务表格
 - 对话区中转 API 连通性已从“仅依赖进程环境”调整为“进程环境 + 本地 env 文件 + gemini proxy 别名兼容”，仍需在实际运行环境补入真实 key/base_url 后再做最终联调确认
 - 本地 relay 配置当前已在 `python-agent-service/.env.local` 落地；但默认 8000 端口仍可能命中旧监听，因此网页实测时优先使用干净 8001 后端实例
 - 浏览器开发态页面当前已能打开 `chat-workbench` 并发送消息；由于 8000 旧监听仍未清理，后续若恢复默认代理口径前仍建议继续使用 8001 干净实例做 relay 联调
@@ -141,7 +147,7 @@
 - 执行型智能体目标注册表与 handler 实现
 - 部门表格执行对象 adapter / executor 实现
 - 部门表格写入幂等、防重复与失败回传实现
-- 对话型智能体 ask/approve/command 路由增强实现（歧义消解、审批主链）
+- 对话型智能体 ask/approve/command 路由增强实现（workflow 歧义消解、自然语言参数自动抽取、富消息卡片）
 - execution 状态流完整前端体验（断线重连、终态停流）进一步增强
 - 多模态消息归一化实现
 - monitor incident 模型实现
@@ -182,9 +188,11 @@
 - 为业务表格被动触发补更明确的运行日志/命中解释，方便直接看出是“未命中条件”还是“无发布版”还是“执行启动失败”
 - 为 workflow 执行历史接口补分页或至少显式截断元信息，并补前端请求竞态保护
 - 清理本机默认开发端口 8000 的异常旧监听，恢复“代码与 HTTP 行为一致”的单实例环境
+- 为 dialog-trigger workflow 增加更严格的输入值 / schema 校验与默认值防呆，避免 `unknown-item`、默认数量等兜底结果继续写入业务表格
+- 继续统一历史弹窗、records 事件流等非 chat 主链页面的时间格式工具到 `Asia/Shanghai`
 - 继续推进 `sensor_event_inbox / sensor_subscriptions` 持久化订阅链，以及 `sensor-metadata` 向真实 Go/数据库元数据来源收口
 - 补齐 `department_table` 的真实 route registry、权限/幂等校验、审批恢复后单次写入验证与契约测试
-- 继续推进对话型智能体：候选 workflow 歧义消解、参数补齐、审批恢复卡片与消息流结构化结果展示
+- 继续推进对话型智能体：候选 workflow 歧义消解、自然语言参数自动抽取，以及更丰富的对话型结果卡片样式
 - 准备 M5 收口前置项：监控 incident 模型、执行列表/异常统计、以及关键 execution 主链的契约/集成测试
 - 继续观察 workflow 执行历史里“多节点、多次写入”的展示需求；若单条 history item 同时包含多个 tool output，后续需要从“首条结果摘要”升级为“多结果列表”
 - 后续若要彻底去掉兼容分支，应统一 `sensor_metadata.py` 与 RecordsWorkbench 真实发出的 `source_system` 命名，不再让 `erp_prod` 与 `dayan_mock_records` 双轨并存
@@ -195,4 +203,6 @@
 ## 文档同步状态
 - 本轮已重点复核并再次同步：`frontend-code-structure.md`（补 ChatWindow 时间显示与 CEO 写操作 scope 口径）、`python-service-api.md`（补 chat send/start 的 `include_all + dept_id` scope 与消息 `created_at` 返回）、`implementation-plan.md`（补当前收尾优先级）、`progress-tracker.md`（清理已完成的下一步项）、`change-log.md`（补本轮收尾同步留痕）
 - 本轮已重点复核并再次同步：`workflow-dsl.md`（补 execution_agent chat-only / result_template 口径）、`langgraph-runtime.md`（补 execution_agent chat-delivery runtime 行为）、`frontend-code-structure.md`（补执行型面板 chat-only 交互）、`progress-tracker.md`（补当前完成状态）、`change-log.md`（补本轮实现留痕）
+- 本轮已补同步：`workflow-dsl.md`（补 `dialog_agent.config` 承载对话触发规则的口径）、`frontend-code-structure.md`（补对话触发配置收口到节点面板）、`python-service-api.md`（补 publish 从 `dialog_agent.config` 抽取 registry 元数据）、`api-event-contracts.md`（补 dialog_trigger registry 检索与 `allowed_roles` 过滤约束）、`progress-tracker.md`、`change-log.md`
+- 本轮已补同步：`frontend-code-structure.md`（补中心工作台位置、流程目录总览弹窗、Chat 时间工具与 AttachmentPanel 删除口径）、`python-service-api.md`（补 Auth API、chat session delete、history scope、60s timeout 与 registry 去重口径）、`api-event-contracts.md`（补 chat delete、scope、缺参优先规则与旧 registry 失活约束）、`langgraph-runtime.md`（补执行结果多主会话回传）、`workflow-dsl.md`（补 dialog-trigger 发布失活旧 registry 条目）、`implementation-plan.md`、`progress-tracker.md`、`change-log.md`
 - 其余已在前几轮同步过且本轮未发生事实变化的 references，本轮不再重复改写

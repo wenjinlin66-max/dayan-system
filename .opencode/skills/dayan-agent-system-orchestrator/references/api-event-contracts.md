@@ -181,6 +181,7 @@
 | 接口 | 方法 | 说明 | 鉴权 | 幂等 |
 |---|---|---|---|---|
 | /api/v1/chat/sessions | POST | 创建对话会话 | Python侧鉴权 | 否 |
+| /api/v1/chat/sessions/:session_id | DELETE | 删除对话会话及其消息 | Python侧鉴权 | 是 |
 | /api/v1/chat/sessions/:session_id/messages | POST | 发送对话消息/语音/PDF 指令 | Python侧鉴权 | 否 |
 | /api/v1/chat/sessions/:session_id/messages | GET | 查询会话消息 | Python侧鉴权 | 是 |
 | /api/v1/chat/sessions/:session_id/approvals | GET | 查询会话内审批卡片 | Python侧鉴权 | 是 |
@@ -196,6 +197,9 @@
 - 当 execution 因 `approval` 节点进入等待审批时，应向当前 chat session 写入一条审批提醒消息
 - 当审批被同意/驳回时，应向当前 chat session 写入一条审批结果消息
 - 当 execution 进入 finished / failed / cancelled 终态时，应向当前 chat session 写入一条执行结果消息
+- `chat/workflows/catalog` 当前默认应仅暴露 `dialog_trigger` 类型 workflow，且要经过 `allowed_roles` 过滤
+- `chat/sessions/:session_id/messages` 与 `chat/sessions/:session_id/workflows/:workflow_id/start` 当前都支持 `include_all + dept_id` 组合；CEO 聚焦具体部门时应继续以该组合做 scope 校验，而不是退回 `dept_id=ceo`
+- 对于 dialog-trigger workflow，聊天候选返回前当前已按 `workflow_id` 去重，发布新版本时也应同步让旧 `workflow_registry` 条目失活，避免同一 workflow 因历史 active 版本重复出现在候选列表中
 
 ### 2.6 对话路由契约
 对话型智能体不得只靠自由语言直接执行 workflow，必须走：
@@ -203,6 +207,7 @@
 2. 若为 `command`，先查 workflow registry
 3. 进行 `dept_id + role + required_inputs` 过滤
 4. 若有多个候选且不明确，则返回候选列表请求用户确认
+5. 若 workflow 仅有一个高置信候选但 `required_inputs` 缺失，必须优先返回 `missing_inputs` 与参数补齐提示，不得直接执行并使用默认兜底值继续写表
 
 路由响应示例：
 ```json
@@ -262,6 +267,8 @@
 - 若 workflow registry 中声明了 `required_inputs`，则目录启动、候选确认启动、自动命令启动都必须先经过缺参校验
 - 缺参时不得直接创建 execution，而是返回 `missing_inputs + candidate_workflows[0].input_schema`，由前端继续渲染参数补齐卡片
 - 参数补齐后的再次启动，必须继续复用同一条 `chat/sessions/:session_id/workflows/:workflow_id/start` 接口
+- `command` 路由当前应只面向 `dialog_trigger` workflow 做 registry 检索，检索字段至少包括：`title / summary / synonyms / example_utterances`
+- registry 命中后，必须继续按 `dept_id / allowed_roles / required_inputs` 做过滤，不能只靠自然语言直接硬选
 
 执行状态 SSE 示例：
 ```text

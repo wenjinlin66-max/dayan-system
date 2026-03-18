@@ -266,6 +266,15 @@
   5. `department_table / feishu / email / mcp` 目标注册表、真实 executor、权限/幂等校验
 - 本阶段不再把“Gemini 中转 ask 路径最小验证”或“Vite 默认代理回到 8000”作为下一步功能项：这两项代码口径已完成，剩余的是本机 8000 旧监听等环境收口问题
 
+## 当前收尾优先级（2026-03-19）
+- 在不新增大功能的前提下，优先完成“对话工作台最近修复 → references 同步 → 下一步上下文 → GitHub 同步”的第二轮收尾闭环
+- M3/M4 当前近端优先级收口为：
+  1. dialog-trigger workflow 的发布/选流/启动链路继续收紧输入值校验，避免默认兜底值（如 `unknown-item`）继续写入业务表格
+  2. workflow 历史查询、chat scope、CEO 聚焦部门口径继续统一，避免“查看区有、对话区没有”这类范围不一致
+  3. chat 主链外的历史弹窗、records 时间展示继续统一到 `Asia/Shanghai` 时间工具
+  4. workflow registry 去重、旧 active 条目失活、长耗时启动超时治理当前已收口到可用状态，下一步以回归验证和权限闸加固为主，不再继续扩功能
+  5. 右侧“部门流程目录 + 中心工作台”布局与 dialog-trigger 目录行为已收口，后续仅继续做统一风格与可用性细化，不再重构结构
+
 ## 阶段间依赖关系
 - M2 依赖 M1 的 workflow 真相源与编译能力
 - M3 依赖 M1 + M2 的 workflow 主链

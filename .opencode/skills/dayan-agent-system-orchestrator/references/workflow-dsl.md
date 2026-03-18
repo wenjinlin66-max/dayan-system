@@ -85,6 +85,13 @@
 }
 ```
 
+### 4.1 对话触发型 workflow 的发布元数据
+- 当 workflow 分类为 `dialog_trigger` 时，触发规则当前应配置在 `dialog_agent.config` 中，而不是挂在 workflow 顶层 `ui_schema.meta`
+- 该配置在编辑态归属于 `dialog_agent` 节点，但发布时会被抽取并写入 `workflow_registry`，作为 chat route 的选流元数据
+- 当前最小字段：`summary / synonyms / example_utterances / allowed_roles / required_inputs / input_schema`
+- chat workbench 的 workflow 目录、候选检索、缺参补齐与角色过滤都应消费这组 registry 元数据，而不是临时硬编码在聊天页
+- 发布新版本时，旧的 active `workflow_registry` 条目当前应先失活，再写入新版本条目；chat route / chat start 也会按 `workflow_id` 只保留最新有效条目，避免同一 dialog workflow 因多次发布在候选区重复出现
+
 ## 5. 各节点最小配置
 
 ### 5.1 sensor_agent

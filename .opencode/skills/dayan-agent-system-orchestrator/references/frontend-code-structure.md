@@ -31,6 +31,7 @@ agent-collab-module/
 │  │  │  ├─ ChatSidebar.vue
 │  │  │  ├─ ChatWindow.vue
 │  │  │  ├─ ApprovalCard.vue
+│  │  │  ├─ OperationsCenter.vue
 │  │  │  └─ MessageComposer.vue
 │  │  ├─ monitor/
 │  │  │  ├─ MetricsCards.vue
@@ -73,7 +74,10 @@ agent-collab-module/
 │  │  └─ index.css
 │  └─ utils/
 │     ├─ canvasMapper.ts
+│     ├─ dateTime.ts
 │     ├─ dslCompiler.ts
+│     ├─ erpDepartments.ts
+│     ├─ chatIdentity.ts
 │     └─ permission.ts
 └─ index.ts
 ```
@@ -211,9 +215,20 @@ agent-collab-module/
 - `MessageComposer.vue` 默认按“问答优先、流程辅助”设计，不再只以命令输入形态出现
 - 中间主对话区应避免重复出现“AI 主区域说明卡”，保留消息流与输入框本体即可，减少装饰性文案占位
 - 多模态输入的最终目标形态应并入主输入框交互（像通用大模型产品一样由用户直接拖入图片/PDF或切换输入模式），当前阶段不再在页面上单独展示附件入口卡片
-- 左侧辅助区应优先放置“最近历史会话 + 审批待办 + 执行结果”，右侧收口为流程目录，避免把审批信息放到离会话太远的位置
+- 左侧辅助区当前以“身份/会话”为主，右侧第三列收口为“部门流程目录 + 中心工作台”；中心工作台当前已合并审批任务与执行结果查看，不再拆成两个分散入口
 - `ChatSidebar.vue` 默认只展示少量最近会话，完整历史应通过居中弹窗打开供用户选择，而不是长列表直接占满侧栏
 - 对话区中的部门 workflow 目录当前应为每条 workflow 提供“执行历史”入口，点击后在中间弹窗中查看该 workflow 在当前部门下的执行记录，并按执行类型分类展示
+- 对话区的 workflow 目录当前默认只应展示 `dialog_trigger` 类型流程；事件触发、定时触发流程不应作为用户在 chat 中直接启动的对象暴露
+- `DepartmentWorkflowCatalog.vue` 当前已增加“打开流程目录”总览弹窗，用于在中间弹窗里按部门 / workflow 类型总览当前可见流程
+- `OperationsCenter.vue` 当前位于右侧流程目录下方，作为“审批任务与执行结果查看”入口；中心弹窗内部使用 tab 切换审批任务与执行结果
+- `ChatWindow.vue` 当前候选 workflow 按钮在渲染前会按 `workflow_id` 再做一次前端去重，避免旧消息 payload 中的重复候选被完整显示出来
+- `utils/dateTime.ts` 当前已作为 chat 主链统一时间格式工具，固定按 `Asia/Shanghai` 展示；`ChatWindow.vue`、`ChatSidebar.vue` 已切到该工具，执行历史/records 等其他页面仍存在局部 `new Date().toLocaleString` 口径，尚未全部统一
+
+### 4.2.1 WorkflowCanvasPage.vue 对话触发补充口径
+- 当 workflow 分类选择为 `dialog_trigger` 时，对话触发规则不应漂在画布页顶部；当前应收口到 `dialog_agent` 节点配置面板内
+- `DialogConfigPanel.vue` 当前除 `promptHint / intentTag / responseStyle / memoryProfile` 外，还应维护：`summary`、`synonyms`、`example_utterances`、`allowed_roles`、`required_inputs`、`input_schema`
+- 上述字段要跟随 `dialog_agent.config` 一起保存到草稿，并在重新加载 workflow 时恢复；不能只在发布瞬间临时输入
+- 发布时再从 `dialog_agent.config` 抽取这些字段写入 `workflow_registry`，供 chat route 做“语义理解 + 目录检索 + 角色过滤 + 缺参补齐 + 必要时确认”
 
 工作流查看区分类/删除口径：
 - 查看区当前筛选项应显示为“触发逻辑分类”，不再使用助手自行定义的业务分类
@@ -232,10 +247,9 @@ agent-collab-module/
 
 对话工作台当前阶段建议拆分：
 - `DepartmentWorkflowCatalog.vue`：按部门 + 职能分类查询 workflow
-- `ApprovalWorkbench.vue`：审批任务区
-- `ExecutionResultCard.vue`：执行结果展示
+- `OperationsCenter.vue`：审批任务与执行结果的统一查看入口，中心弹窗内按 tab 切换“审批任务 / 执行结果”
 - `WorkflowParameterCard.vue`：workflow 缺参时的参数补齐卡片
-- 多模态附件入口当前不再保留独立组件卡片，后续统一并入主输入框交互
+- 多模态附件入口当前不再保留独立组件卡片（`AttachmentPanel.vue` 已删除），后续统一并入主输入框交互
 
 ### 4.3 MonitorWorkbenchPage.vue
 负责：
