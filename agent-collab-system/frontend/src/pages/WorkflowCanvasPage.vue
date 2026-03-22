@@ -130,7 +130,7 @@
             </div>
             <div>
               <div class="mb-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">数据表</div>
-              <el-input v-model="mockTable" placeholder="inventory_stock" />
+              <el-input v-model="mockTable" placeholder="parts_demand" />
             </div>
           </div>
 
@@ -141,17 +141,17 @@
 
           <div>
             <div class="mb-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">变更字段</div>
-            <el-input v-model="mockChangedFieldsText" placeholder="stock_count,updated_at" />
+              <el-input v-model="mockChangedFieldsText" placeholder="source_type,required_qty,updated_at" />
           </div>
 
           <div>
             <div class="mb-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">after 快照 JSON</div>
-            <el-input v-model="mockAfterJson" type="textarea" :rows="7" placeholder='{"item_id":"A-1001","stock_count":16,"safety_limit":20,"warehouse_id":"W-01"}' />
+              <el-input v-model="mockAfterJson" type="textarea" :rows="7" placeholder='{"order_no":"SO-20260321-001","product_code":"PHONE-001","part_code":"CAM-001","part_name":"摄像头模组","source_type":"purchase","required_qty":20,"purchase_qty":20,"manufacture_qty":0,"customer_qty":0,"total_cost":5600}' />
           </div>
 
           <div>
             <div class="mb-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">before 快照 JSON（可选）</div>
-            <el-input v-model="mockBeforeJson" type="textarea" :rows="5" placeholder='{"item_id":"A-1001","stock_count":18,"safety_limit":20,"warehouse_id":"W-01"}' />
+              <el-input v-model="mockBeforeJson" type="textarea" :rows="5" placeholder='{"order_no":"SO-20260321-001","product_code":"PHONE-001","part_code":"CAM-001","source_type":"purchase","required_qty":18,"purchase_qty":18}' />
           </div>
 
           <div v-if="latestMockExecution" class="rounded-[18px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -202,11 +202,11 @@ const mockInjecting = ref(false)
 const mockEventType = ref('record.updated')
 const mockSource = ref('go.records.gateway')
 const mockSourceSystem = ref('ERP生产库')
-const mockTable = ref('inventory_stock')
+const mockTable = ref('parts_demand')
 const mockOperation = ref('updated')
-const mockChangedFieldsText = ref('stock_count,updated_at')
-const mockAfterJson = ref('{\n  "item_id": "A-1001",\n  "stock_count": 16,\n  "safety_limit": 20,\n  "warehouse_id": "W-01"\n}')
-const mockBeforeJson = ref('{\n  "item_id": "A-1001",\n  "stock_count": 18,\n  "safety_limit": 20,\n  "warehouse_id": "W-01"\n}')
+const mockChangedFieldsText = ref('source_type,required_qty,updated_at')
+const mockAfterJson = ref('{\n  "order_no": "SO-20260321-001",\n  "product_code": "PHONE-001",\n  "part_code": "CAM-001",\n  "part_name": "摄像头模组",\n  "source_type": "purchase",\n  "required_qty": 20,\n  "purchase_qty": 20,\n  "manufacture_qty": 0,\n  "customer_qty": 0,\n  "total_cost": 5600\n}')
+const mockBeforeJson = ref('{\n  "order_no": "SO-20260321-001",\n  "product_code": "PHONE-001",\n  "part_code": "CAM-001",\n  "source_type": "purchase",\n  "required_qty": 18,\n  "purchase_qty": 18\n}')
 const latestMockExecution = ref('')
 let runtimePollTimer: number | null = null
 

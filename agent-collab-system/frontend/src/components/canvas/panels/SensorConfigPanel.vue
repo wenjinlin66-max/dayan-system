@@ -43,7 +43,7 @@
       </div>
 
       <div v-if="conditionRows.length === 0" class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-6 text-sm text-slate-500">
-        还没有触发规则。可以先新增一条，例如“库存数量 小于 安全库存”。
+        还没有触发规则。可以先新增一条，例如“来源类型 等于 purchase”。
       </div>
 
       <div v-else class="space-y-3">
@@ -121,7 +121,7 @@
       </div>
 
       <div class="space-y-3">
-        <el-input v-model="outputEventName" placeholder="输出事件名，如 inventory.low_stock.detected" />
+        <el-input v-model="outputEventName" placeholder="输出事件名，如 parts_demand.purchase.detected" />
         <el-select v-model="selectedFields" class="w-full" multiple collapse-tags collapse-tags-tooltip placeholder="选择要透传的字段">
           <el-option v-for="field in availableFields" :key="field.value" :label="field.label" :value="field.value" />
         </el-select>
@@ -129,7 +129,7 @@
           v-model="outputMappingText"
           type="textarea"
           :rows="5"
-          placeholder="item_id=payload.item_id&#10;stock_count=payload.stock_count&#10;event_type=event.event_type"
+          placeholder="order_no=payload.order_no&#10;part_code=payload.part_code&#10;source_type=payload.source_type"
         />
       </div>
     </section>

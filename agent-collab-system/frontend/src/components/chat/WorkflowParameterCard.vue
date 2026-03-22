@@ -87,6 +87,7 @@ const props = defineProps<{
   source: string
   sourceMessageId?: string
   missingInputs?: string[]
+  suggestedInputValues?: Record<string, unknown>
 }>()
 
 const { startSelectedWorkflow } = useChatSession()
@@ -120,6 +121,20 @@ const fields = computed<FieldConfig[]>(() => {
     }
   })
 })
+
+for (const [key, value] of Object.entries(props.suggestedInputValues ?? {})) {
+  if (typeof value === 'boolean') {
+    booleanValues[key] = value
+    continue
+  }
+  if (typeof value === 'number') {
+    numberValues[key] = value
+    continue
+  }
+  if (typeof value === 'string') {
+    textValues[key] = value
+  }
+}
 
 const submitting = computed(() => false)
 

@@ -34,6 +34,7 @@
           source="parameter_completion"
           :source-message-id="message.message_id"
           :missing-inputs="missingInputs(message)"
+          :suggested-input-values="suggestedInputValues(message)"
         />
 
         <div v-if="candidateWorkflows(message).length > 0" class="mt-3 flex flex-wrap gap-2">
@@ -98,6 +99,11 @@ const missingInputs = (message: ChatMessage): string[] => {
 const parameterWorkflow = (message: ChatMessage): WorkflowCatalogItem | null => {
   const candidates = candidateWorkflows(message)
   return missingInputs(message).length > 0 && candidates.length === 1 ? candidates[0] : null
+}
+
+const suggestedInputValues = (message: ChatMessage): Record<string, unknown> => {
+  const raw = message.payload?.suggested_input_values
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
 }
 
 const shouldShowInlineParameterCard = (message: ChatMessage, workflowId: string) => {
