@@ -4,9 +4,12 @@ import httpx
 from math import ceil
 
 from typing import cast
+from sqlalchemy import select
 
 from app.domain.memory.service import MemoryService, RuntimeMemoryBundle
+from app.db.session import get_mock_session_factory
 from app.integrations.llm.client import LLMClient
+from app.mock_records.db.models import ProductBomRecord
 from app.runtime.models import JsonValue, NodeExecutionResult, RuntimeNode, RuntimeState
 
 
@@ -51,7 +54,7 @@ class DecisionNodeHandler:
             return self._build_model_output(node, payload, state)
         if decision_mode == "llm":
             return await self._build_llm_output(node, payload, state, memory)
-        return self._build_rule_output(node, payload, state)
+        return await self._build_rule_output(node, payload, state)
 
     @staticmethod
     def _resolve_decision_payload(payload: dict[str, JsonValue], *, state: RuntimeState) -> dict[str, JsonValue]:
@@ -64,11 +67,13 @@ class DecisionNodeHandler:
                 return merged
         return payload
 
-    @staticmethod
-    def _build_rule_output(node: RuntimeNode, payload: dict[str, JsonValue], state: RuntimeState) -> dict[str, JsonValue]:
+    async def _build_rule_output(self, node: RuntimeNode, payload: dict[str, JsonValue], state: RuntimeState) -> dict[str, JsonValue]:
         _ = state
         base_payload = payload
         rule_config = DecisionNodeHandler._object_dict(node.config.get("rule_config"))
+        rule_set_ref = DecisionNodeHandler._string_value(node.config.get("rule_set_ref"), default="default_rule_set")
+        if rule_set_ref == "parts_demand_projection":
+            return await self._build_parts_demand_projection_output(node, payload, state)
         severity_thresholds = DecisionNodeHandler._float_dict(rule_config.get("severity_thresholds"), {"high": 0.3, "medium": 0.8, "low": 1.0})
         target_item_field = DecisionNodeHandler._string_value(rule_config.get("target_item_field"), default="item_id")
         quantity_field = DecisionNodeHandler._string_value(rule_config.get("quantity_field"), default="recommended_quantity")
@@ -95,7 +100,7 @@ class DecisionNodeHandler:
                     "safety_limit": safety_limit,
                     "gap": gap,
                     "recommended_quantity": recommended_quantity,
-                    "rule_set_ref": str(node.config.get("rule_set_ref") or "default_rule_set"),
+                    "rule_set_ref": rule_set_ref,
                 }
             ),
             "risk_level": severity if severity in {"low", "medium"} else "high",
@@ -112,6 +117,186 @@ class DecisionNodeHandler:
             "explanation": f"根据库存/阈值规则判断当前缺口为 {gap}，库存比例为 {ratio if ratio is not None else 'unknown'}，因此输出 {severity} 级决策。",
             "citations": [],
         }
+
+    async def _build_parts_demand_projection_output(
+        self,
+        node: RuntimeNode,
+        payload: dict[str, JsonValue],
+        state: RuntimeState,
+    ) -> dict[str, JsonValue]:
+        order_no = self._string_value(payload.get("order_no"), default="")
+        customer_name = self._string_value(payload.get("customer_name"), default="")
+        product_code = self._string_value(payload.get("product_code"), default="")
+        product_name = self._string_value(payload.get("product_name"), default="")
+        ordered_qty = self._coerce_int(payload.get("ordered_qty"))
+        raw_event = state.input_payload.get("event")
+        event_envelope = cast(dict[str, JsonValue], raw_event) if isinstance(raw_event, dict) else {}
+        raw_event_payload = event_envelope.get("payload")
+        event_payload = cast(dict[str, JsonValue], raw_event_payload) if isinstance(raw_event_payload, dict) else {}
+        operation = str(event_payload.get("operation") or "")
+
+        if operation == "deleted":
+            return {
+                "decision_mode": "rule",
+                "decision_summary": f"{node.name} 已清理被删除订单对应的零件需求投影",
+                "decision_payload": {
+                    "projection_type": "parts_demand_projection",
+                    "source_table": "customer_order",
+                    "target_table": "parts_demand",
+                    "order_no": order_no,
+                    "replace_by": {
+                        "field": "order_no",
+                        "value": order_no,
+                    },
+                    "table_write": {},
+                    "table_writes": [],
+                    "chat_report": {
+                        "title": "订单删除已同步需求清理",
+                        "content": f"订单 {order_no or '未命名订单'} 的零件需求及下游分发表已清理。",
+                        "audience": "supply_chain",
+                    },
+                },
+                "risk_level": "low",
+                "recommended_actions": [
+                    {
+                        "action_type": "replace_department_table_rows",
+                        "params": {
+                            "target_ref": "parts_demand",
+                            "replace_by_field": "order_no",
+                            "replace_by_value": order_no,
+                            "row_count": 0,
+                        },
+                    }
+                ],
+                "explanation": f"订单 {order_no or '未命名订单'} 已删除，因此需要清理对应的 parts_demand 与下游分发表。",
+                "citations": [],
+            }
+
+        bom_rows = await self._load_bom_rows(product_code)
+        table_writes: list[dict[str, JsonValue]] = []
+        aggregated: dict[tuple[str, str], dict[str, JsonValue]] = {}
+        for bom in bom_rows:
+            required_qty = max(0, ordered_qty * self._coerce_int(bom.qty_per_unit))
+            source_type = self._normalize_source_type(bom.source_type)
+            key = (str(bom.part_code), source_type)
+            purchase_qty = required_qty if source_type == "purchase" else 0
+            manufacture_qty = required_qty if source_type == "manufacture" else 0
+            customer_qty = required_qty if source_type == "customer" else 0
+            existing = aggregated.get(key)
+            if existing is None:
+                aggregated[key] = {
+                    "id": f"dem_{order_no}_{bom.part_code}_{source_type}",
+                    "order_no": order_no,
+                    "customer_name": customer_name,
+                    "product_code": product_code,
+                    "product_name": product_name,
+                    "part_code": str(bom.part_code),
+                    "part_name": str(bom.part_name),
+                    "source_type": source_type,
+                    "required_qty": required_qty,
+                    "purchase_qty": purchase_qty,
+                    "manufacture_qty": manufacture_qty,
+                    "customer_qty": customer_qty,
+                    "unit_cost": float(bom.unit_cost or 0),
+                    "total_cost": round(required_qty * float(bom.unit_cost or 0), 2),
+                }
+                continue
+            existing["required_qty"] = self._coerce_int(cast(object | None, existing.get("required_qty"))) + required_qty
+            existing["purchase_qty"] = self._coerce_int(cast(object | None, existing.get("purchase_qty"))) + purchase_qty
+            existing["manufacture_qty"] = self._coerce_int(cast(object | None, existing.get("manufacture_qty"))) + manufacture_qty
+            existing["customer_qty"] = self._coerce_int(cast(object | None, existing.get("customer_qty"))) + customer_qty
+            existing["total_cost"] = round(self._coerce_float(cast(object | None, existing.get("total_cost"))) + required_qty * float(bom.unit_cost or 0), 2)
+
+        table_writes = list(aggregated.values())
+        decision_payload: dict[str, JsonValue] = {
+            "projection_type": "parts_demand_projection",
+            "source_table": "customer_order",
+            "target_table": "parts_demand",
+            "order_no": order_no,
+            "product_code": product_code,
+            "product_name": product_name,
+            "customer_name": customer_name,
+            "ordered_qty": ordered_qty,
+            "replace_by": {
+                "field": "order_no",
+                "value": order_no,
+            },
+            "table_write": table_writes[0] if table_writes else {},
+            "table_writes": cast(JsonValue, table_writes),
+            "chat_report": {
+                "title": "订单已完成零件需求拆解",
+                "content": f"订单 {order_no or '未命名订单'} 已按产品 BOM 生成 {len(table_writes)} 条零件需求。",
+                "audience": "supply_chain",
+            },
+        }
+        return {
+            "decision_mode": "rule",
+            "decision_summary": f"{node.name} 已根据产品 BOM 生成零件需求投影",
+            "decision_payload": decision_payload,
+            "risk_level": "low",
+            "recommended_actions": [
+                {
+                    "action_type": "replace_department_table_rows",
+                    "params": {
+                        "target_ref": "parts_demand",
+                        "replace_by_field": "order_no",
+                        "replace_by_value": order_no,
+                        "row_count": len(table_writes),
+                    },
+                }
+            ],
+            "explanation": f"基于 {product_code or 'unknown-product'} 的 BOM 展开订单数量 {ordered_qty}，重建对应 parts_demand。",
+            "citations": [],
+        }
+
+    @staticmethod
+    async def _load_bom_rows(product_code: str) -> list[ProductBomRecord]:
+        if not product_code:
+            return []
+        async with get_mock_session_factory()() as session:
+            result = await session.execute(
+                select(ProductBomRecord).where(ProductBomRecord.product_code == product_code).order_by(ProductBomRecord.updated_at.desc())
+            )
+            return list(result.scalars().all())
+
+    @staticmethod
+    def _coerce_int(value: object | None) -> int:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(float(value.strip() or "0"))
+            except ValueError:
+                return 0
+        return 0
+
+    @staticmethod
+    def _coerce_float(value: object | None) -> float:
+        if isinstance(value, bool):
+            return float(value)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.strip() or "0")
+            except ValueError:
+                return 0.0
+        return 0.0
+
+    @staticmethod
+    def _normalize_source_type(value: object | None) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized in {"purchase", "采购", "buy", "purchasing", "采购件"}:
+            return "purchase"
+        if normalized in {"manufacture", "生产", "制造", "自制", "manufacturing"}:
+            return "manufacture"
+        if normalized in {"customer", "客户提供", "客户供料", "客供", "客户", "customer_supply"}:
+            return "customer"
+        return "purchase"
 
     @staticmethod
     def _build_model_output(node: RuntimeNode, payload: dict[str, JsonValue], state: RuntimeState) -> dict[str, JsonValue]:

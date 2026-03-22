@@ -6,11 +6,13 @@ from app.api.router import api_router
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.db.base import Base
+from app.db.bootstrap_workflows import cleanup_legacy_workflow_artifacts, seed_dialog_order_workflow, seed_order_projection_workflow, seed_parts_demand_workflows
 from app.db.models import *  # noqa: F403
 from app.db.session import get_engine
 from app.db.session import ensure_mock_database_exists
 from app.db.session import get_mock_engine
 from app.db.session import get_mock_session_factory
+from app.db.session import get_session_factory
 from app.mock_records.db.base import MockRecordsBase
 from app.mock_records.db.bootstrap import seed_mock_records
 from app.mock_records.db.models import *  # noqa: F403
@@ -28,6 +30,14 @@ async def lifespan(_: FastAPI):
         await conn.run_sync(MockRecordsBase.metadata.create_all)
     async with get_mock_session_factory()() as mock_session:
         await seed_mock_records(mock_session)
+    async with get_session_factory()() as session:
+        await seed_parts_demand_workflows(session)
+    async with get_session_factory()() as session:
+        await seed_dialog_order_workflow(session)
+    async with get_session_factory()() as session:
+        await seed_order_projection_workflow(session)
+    async with get_session_factory()() as session:
+        await cleanup_legacy_workflow_artifacts(session)
     yield
 
 

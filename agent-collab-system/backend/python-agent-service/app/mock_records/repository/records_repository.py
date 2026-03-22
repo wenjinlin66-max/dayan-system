@@ -8,20 +8,36 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.mock_records.db.models import (
-    DeviceStatusRecord,
-    InventoryStockRecord,
-    ProductionOrderRecord,
+    CustomerOrderRecord,
+    CustomerSupplyRequestRecord,
+    ManufacturingRequestRecord,
+    PartsDemandRecord,
+    ProductBomRecord,
+    ProductMasterRecord,
+    PurchaseRequestRecord,
     SensorChangeLogRecord,
 )
 
-TableModel = InventoryStockRecord | ProductionOrderRecord | DeviceStatusRecord
+TableModel = (
+    ProductMasterRecord
+    | ProductBomRecord
+    | CustomerOrderRecord
+    | PartsDemandRecord
+    | PurchaseRequestRecord
+    | ManufacturingRequestRecord
+    | CustomerSupplyRequestRecord
+)
 
 
 class MockRecordsRepository:
     TABLE_MODEL_MAP: ClassVar[dict[str, type[TableModel]]] = {
-        "inventory_stock": InventoryStockRecord,
-        "production_order": ProductionOrderRecord,
-        "device_status": DeviceStatusRecord,
+        "product_master": ProductMasterRecord,
+        "product_bom": ProductBomRecord,
+        "customer_order": CustomerOrderRecord,
+        "parts_demand": PartsDemandRecord,
+        "purchase_request": PurchaseRequestRecord,
+        "manufacturing_request": ManufacturingRequestRecord,
+        "customer_supply_request": CustomerSupplyRequestRecord,
     }
     session: AsyncSession
 
@@ -81,6 +97,21 @@ class MockRecordsRepository:
     async def list_recent_events(self, limit: int = 20) -> list[SensorChangeLogRecord]:
         result = await self.session.execute(select(SensorChangeLogRecord).order_by(SensorChangeLogRecord.created_at.desc()).limit(limit))
         return list(result.scalars().all())
+
+    async def list_rows_by_field(self, table_name: str, field_name: str, field_value: object) -> list[TableModel]:
+        model = self.get_model(table_name)
+        column = getattr(model, field_name, None)
+        if column is None:
+            raise ValueError("RECORDS_TABLE_FIELD_NOT_FOUND")
+        result = await self.session.execute(select(model).where(column == field_value).order_by(model.updated_at.desc()))
+        return list(result.scalars().all())
+
+    async def delete_rows_by_field(self, table_name: str, field_name: str, field_value: object) -> list[TableModel]:
+        rows = await self.list_rows_by_field(table_name, field_name, field_value)
+        for row in rows:
+            await self.session.delete(row)
+        await self.session.flush()
+        return rows
 
     async def remove_execution_references(self, execution_id: str) -> None:
         result = await self.session.execute(select(SensorChangeLogRecord).where(SensorChangeLogRecord.triggered_execution_ids.is_not(None)))

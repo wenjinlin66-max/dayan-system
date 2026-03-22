@@ -2,16 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timezone
+import re
 from uuid import uuid4
 from typing import cast
 
 import httpx
+from sqlalchemy import select
 
 from app.db.models.chat import ChatMessage, ChatSession
 from app.db.models.workflow import WorkflowRegistry
 from app.domain.chat.repository import ChatRepository
 from app.domain.executions.service import ExecutionService
+from app.db.session import get_mock_session_factory
 from app.integrations.llm.client import LLMClient
+from app.mock_records.db.models import ProductMasterRecord
 from app.schemas.chat import (
     ChatMessageCreateRequest,
     ChatMessageListResponse,
@@ -34,6 +38,7 @@ class RouteDecision:
     needs_confirmation: bool
     reply: str
     missing_inputs: list[str]
+    suggested_inputs: dict[str, object]
     execution_id: str | None = None
 
 
@@ -181,6 +186,7 @@ class ChatService:
             "route_type": decision.route_type,
             "candidate_workflows": [self._catalog_item(entry, None).model_dump() for entry in deduped_candidates],
             "missing_inputs": decision.missing_inputs,
+            "suggested_input_values": decision.suggested_inputs,
         }
         assistant_message = ChatMessage(
             id=f"msg_{uuid4().hex[:12]}",
@@ -336,7 +342,11 @@ class ChatService:
         if selected is None:
             raise ValueError("WORKFLOW_NOT_FOUND")
 
-        missing_inputs = self._missing_required_inputs(selected, payload.input_values)
+        merged_input_values = await self._merge_input_values_from_source_message(
+            payload.input_values or {},
+            payload.source_message_id,
+        )
+        missing_inputs = self._missing_required_inputs(selected, merged_input_values)
         if missing_inputs:
             assistant_message = ChatMessage(
                 id=f"msg_{uuid4().hex[:12]}",
@@ -349,6 +359,7 @@ class ChatService:
                     "route_type": "command",
                     "candidate_workflows": [self._catalog_item(selected, 1.0).model_dump()],
                     "missing_inputs": missing_inputs,
+                    "suggested_input_values": merged_input_values,
                     "source": payload.source,
                     "source_message_id": payload.source_message_id,
                 },
@@ -392,7 +403,7 @@ class ChatService:
                 input={
                     "message": user_note,
                     "source": payload.source,
-                    "input_values": payload.input_values or {},
+                    "input_values": merged_input_values,
                 },
             ),
             dept_id=dept_id,
@@ -409,7 +420,7 @@ class ChatService:
             payload={
                 "route_type": "command",
                 "workflow": self._catalog_item(selected, 1.0).model_dump(),
-                "input_values": payload.input_values or {},
+                "input_values": merged_input_values,
             },
             related_execution_id=execution.execution_id,
         )
@@ -444,12 +455,13 @@ class ChatService:
                 needs_confirmation=False,
                 reply="已识别为审批操作，后续接入审批恢复主链。",
                 missing_inputs=[],
+                suggested_inputs={},
             )
 
         entries = self._dedupe_registry_entries(await self.repository.list_catalog(dept_id, category="dialog_trigger"))
         entries = self._filter_entries_by_roles(entries, roles)
         scored = self._score_candidates(normalized, entries)
-        command_keywords = ("启动", "执行", "发起", "运行", "触发", "帮我")
+        command_keywords = ("启动", "执行", "发起", "运行", "触发", "录入", "登记")
         question_hints = ("什么", "怎么", "为何", "为什么", "吗", "？", "?")
         is_question_like = any(keyword in normalized for keyword in question_hints)
         is_command_like = (any(keyword in normalized for keyword in command_keywords) or any(score >= 2 for _, score in scored)) and not is_question_like
@@ -458,7 +470,8 @@ class ChatService:
             top_entries = [entry for entry, score in scored if score == top_score and score > 0]
             if len(top_entries) == 1:
                 chosen = top_entries[0]
-                missing_inputs = self._missing_required_inputs(chosen, None)
+                suggested_inputs = await self._extract_structured_inputs(chosen, normalized)
+                missing_inputs = self._missing_required_inputs(chosen, suggested_inputs)
                 if missing_inputs:
                     return RouteDecision(
                         route_type="command",
@@ -466,6 +479,7 @@ class ChatService:
                         needs_confirmation=True,
                         reply=self._build_input_prompt(chosen, missing_inputs),
                         missing_inputs=missing_inputs,
+                        suggested_inputs=suggested_inputs,
                     )
                 execution = await self.execution_service.start(
                     ExecutionStartRequest(
@@ -475,7 +489,7 @@ class ChatService:
                         trigger=ExecutionTrigger(type="chat", session_id=session_id, message_id=None),
                         dept_id=dept_id,
                         operator=ExecutionOperator(user_id=user_id, roles=roles),
-                        input={"message": normalized},
+                        input={"message": normalized, "input_values": suggested_inputs},
                     ),
                     dept_id=dept_id,
                     user_id=user_id,
@@ -487,6 +501,7 @@ class ChatService:
                     needs_confirmation=False,
                     reply=reply,
                     missing_inputs=[],
+                    suggested_inputs=suggested_inputs,
                     execution_id=execution.execution_id,
                 )
 
@@ -497,11 +512,13 @@ class ChatService:
                     needs_confirmation=True,
                     reply="我找到了多个候选 workflow，请在右侧目录确认你要启动哪一个。",
                     missing_inputs=[],
+                    suggested_inputs={},
                 )
 
         if is_command_like and len(entries) == 1:
             chosen = entries[0]
-            missing_inputs = self._missing_required_inputs(chosen, None)
+            suggested_inputs = await self._extract_structured_inputs(chosen, normalized)
+            missing_inputs = self._missing_required_inputs(chosen, suggested_inputs)
             if missing_inputs:
                 return RouteDecision(
                     route_type="command",
@@ -509,6 +526,7 @@ class ChatService:
                     needs_confirmation=True,
                     reply=self._build_input_prompt(chosen, missing_inputs),
                     missing_inputs=missing_inputs,
+                    suggested_inputs=suggested_inputs,
                 )
             execution = await self.execution_service.start(
                 ExecutionStartRequest(
@@ -518,7 +536,7 @@ class ChatService:
                     trigger=ExecutionTrigger(type="chat", session_id=session_id, message_id=None),
                     dept_id=dept_id,
                     operator=ExecutionOperator(user_id=user_id, roles=roles),
-                    input={"message": normalized},
+                    input={"message": normalized, "input_values": suggested_inputs},
                 ),
                 dept_id=dept_id,
                 user_id=user_id,
@@ -530,6 +548,7 @@ class ChatService:
                 needs_confirmation=False,
                 reply=reply,
                 missing_inputs=[],
+                suggested_inputs=suggested_inputs,
                 execution_id=execution.execution_id,
             )
 
@@ -539,6 +558,7 @@ class ChatService:
             needs_confirmation=False,
             reply=await self._build_ask_reply(normalized, session_id=session_id, dept_id=dept_id),
             missing_inputs=[],
+            suggested_inputs={},
         )
 
     async def _build_ask_reply(self, content: str, *, session_id: str | None, dept_id: str) -> str:
@@ -665,3 +685,112 @@ class ChatService:
             required_inputs=list(entry.required_inputs or []),
             input_schema=entry.input_schema,
         )
+
+    async def _merge_input_values_from_source_message(
+        self,
+        input_values: dict[str, object],
+        source_message_id: str | None,
+    ) -> dict[str, object]:
+        merged = dict(input_values)
+        if not source_message_id:
+            return merged
+        source_message = await self.repository.get_message(source_message_id)
+        if source_message is None or not isinstance(source_message.payload, dict):
+            return merged
+        suggested = source_message.payload.get("suggested_input_values")
+        if not isinstance(suggested, dict):
+            return merged
+        return {**cast(dict[str, object], suggested), **merged}
+
+    async def _extract_structured_inputs(self, entry: WorkflowRegistry, content: str) -> dict[str, object]:
+        required = set(entry.required_inputs or [])
+        sales_order_required = {"order_no", "customer_name", "product_code", "product_name", "ordered_qty", "unit_price"}
+        if not required.intersection(sales_order_required):
+            return {}
+
+        extracted = await self._extract_sales_order_inputs(content)
+        return {key: value for key, value in extracted.items() if key in required or key == "order_status"}
+
+    async def _extract_sales_order_inputs(self, content: str) -> dict[str, object]:
+        normalized = content.strip()
+        extracted: dict[str, object] = {}
+
+        order_match = re.search(r"(?:订单号|单号|order\s*no\.?)[：:\s]*([A-Za-z0-9_-]{4,64})", normalized, re.IGNORECASE)
+        if order_match:
+            extracted["order_no"] = order_match.group(1).strip()
+        else:
+            so_match = re.search(r"\bSO-[A-Za-z0-9_-]{4,64}\b", normalized, re.IGNORECASE)
+            if so_match:
+                extracted["order_no"] = so_match.group(0).strip()
+
+        customer_patterns = [
+            r"客户[：:\s]*([^，。,；;\n]+?)(?:下单|订购|采购|，|。|；|;|$)",
+            r"([^，。,；;\n]+?)下单",
+            r"([^，。,；;\n]+?)订购",
+        ]
+        for pattern in customer_patterns:
+            customer_match = re.search(pattern, normalized)
+            if customer_match:
+                customer_name = customer_match.group(1).strip()
+                if customer_name and len(customer_name) <= 64:
+                    extracted["customer_name"] = customer_name
+                    break
+
+        quantity_match = re.search(r"(\d+)\s*(?:台|个|套|部|件)", normalized)
+        if quantity_match:
+            extracted["ordered_qty"] = int(quantity_match.group(1))
+        else:
+            generic_quantity = re.search(r"数量[：:\s]*(\d+)", normalized)
+            if generic_quantity:
+                extracted["ordered_qty"] = int(generic_quantity.group(1))
+
+        price_match = re.search(r"(?:单价|价格|金额)[：:\s]*([0-9]+(?:\.[0-9]+)?)", normalized)
+        if price_match:
+            extracted["unit_price"] = float(price_match.group(1))
+
+        product_catalog = await self._load_product_catalog()
+        lowered = normalized.lower()
+        matched_product = next(
+            (
+                item
+                for item in product_catalog
+                if str(item["product_code"]).lower() in lowered
+                or str(item["product_name"]).lower() in lowered
+                or any(alias in lowered for alias in cast(list[str], item.get("aliases") or []))
+            ),
+            None,
+        )
+        if matched_product is not None:
+            extracted["product_code"] = matched_product["product_code"]
+            extracted["product_name"] = matched_product["product_name"]
+            if extracted.get("unit_price") in {None, 0, 0.0}:
+                extracted["unit_price"] = matched_product["unit_price"]
+
+        if extracted:
+            extracted.setdefault("order_status", "draft")
+        return extracted
+
+    async def _load_product_catalog(self) -> list[dict[str, object]]:
+        async with get_mock_session_factory()() as session:
+            result = await session.execute(select(ProductMasterRecord).order_by(ProductMasterRecord.updated_at.desc()))
+            items = list(result.scalars().all())
+        catalog: list[dict[str, object]] = []
+        for item in items:
+            aliases: list[str] = []
+            product_name = item.product_name.lower()
+            product_code = item.product_code.lower()
+            aliases.append(product_code)
+            aliases.append(product_name)
+            if "苹果手机" in product_name or "phone" in product_code:
+                aliases.extend(["苹果手机", "iphone", "手机"])
+            if "平板" in product_name or "pad" in product_code:
+                aliases.extend(["平板", "pad", "平板电脑"])
+            catalog.append(
+                {
+                    "product_code": item.product_code,
+                    "product_name": item.product_name,
+                    "unit_price": item.unit_price,
+                    "aliases": aliases,
+                }
+            )
+        return catalog

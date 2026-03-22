@@ -86,6 +86,10 @@ class ChatRepository:
         )
         return list(result.scalars().all())
 
+    async def get_message(self, message_id: str) -> ChatMessage | None:
+        result = await self.session.execute(select(ChatMessage).where(ChatMessage.id == message_id))
+        return result.scalar_one_or_none()
+
     async def delete_session_for_actor(self, session_id: str, *, dept_id: str, user_id: str) -> bool:
         session = await self.get_session_for_actor(session_id, dept_id, user_id)
         if session is None:

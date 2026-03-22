@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections.abc import Mapping
 from typing import Final
+import re
 from string import Template
 import json
 from typing import Protocol, cast
@@ -38,9 +39,11 @@ class ExecutionContext:
     decision_summary: str | None = None
     decision_explanation: str | None = None
     recommended_actions: list[dict[str, JsonValue]] | None = None
+    sensor_payload: dict[str, JsonValue] | None = None
+    event_payload: dict[str, JsonValue] | None = None
 
 
-SUPPORTED_OPERATIONS: Final[set[str]] = {"append_row", "upsert_row", "update_row"}
+SUPPORTED_OPERATIONS: Final[set[str]] = {"append_row", "upsert_row", "update_row", "append_rows", "upsert_rows", "replace_rows"}
 
 
 class ExecutionNodeHandler:
@@ -60,6 +63,7 @@ class ExecutionNodeHandler:
 
     async def execute(self, node: RuntimeNode, state: RuntimeState, next_nodes: list[str]) -> NodeExecutionResult:
         decision_output = next(reversed(state.decision_outputs.values()), None)
+        latest_sensor = next(reversed(state.sensor_outputs.values()), None)
         context = ExecutionContext(
             execution_id=state.execution_id,
             workflow_id=state.workflow_id,
@@ -92,6 +96,16 @@ class ExecutionNodeHandler:
             recommended_actions=(
                 [cast(dict[str, JsonValue], item) for item in cast(list[object], decision_output.get("recommended_actions")) if isinstance(item, dict)]
                 if isinstance(decision_output, dict) and isinstance(decision_output.get("recommended_actions"), list)
+                else None
+            ),
+            sensor_payload=(
+                cast(dict[str, JsonValue], latest_sensor.get("payload"))
+                if isinstance(latest_sensor, dict) and isinstance(latest_sensor.get("payload"), dict)
+                else None
+            ),
+            event_payload=(
+                cast(dict[str, JsonValue], state.input_payload.get("event"))
+                if isinstance(state.input_payload.get("event"), dict)
                 else None
             ),
         )
@@ -278,12 +292,29 @@ class ExecutionNodeHandler:
         target_dept_id = self._resolve_target_dept_id(target, context)
         row_mapping = self._coerce_mapping(target.get("row_mapping"))
         default_values = self._coerce_mapping(target.get("default_values"))
+        operation = self._string_value(target, "operation")
         default_row_payload = self._extract_table_write_payload(context)
         row_payload: dict[str, JsonValue] = {
             **default_row_payload,
             **default_values,
             **{column: self._resolve_value(path, context) for column, path in row_mapping.items()},
         }
+        rows_payload = self._extract_table_writes_payload(context)
+        resolved_rows_payload: list[dict[str, JsonValue]] = []
+        if operation in {"append_rows", "upsert_rows", "replace_rows"}:
+            for raw_row in rows_payload:
+                merged_row = {**default_values, **raw_row}
+                resolved_rows_payload.append(merged_row)
+        record_key_template = str(target.get("record_key_template") or "")
+        if record_key_template and not row_payload.get("id") and not row_payload.get("record_id"):
+            resolved_record_key = self._render_record_key_template(record_key_template, context)
+            if resolved_record_key:
+                row_payload["id"] = resolved_record_key
+        if record_key_template and resolved_rows_payload:
+            for row in resolved_rows_payload:
+                if row.get("id") or row.get("record_id"):
+                    continue
+                row["id"] = self._render_row_record_key_template(record_key_template, row)
         idempotency_template = str(
             target.get("idempotency_key_template") or "${dept_id}:${execution_id}:${node_id}"
         ).replace("{{", "${").replace("}}", "}")
@@ -310,9 +341,12 @@ class ExecutionNodeHandler:
             "target_code": self._string_value(target, "target_ref"),
             "target_type": "department_table",
             "provider": self._string_value(target, "provider"),
-            "operation": self._string_value(target, "operation"),
+            "operation": operation,
             "idempotency_key": idempotency_key,
             "row_payload": row_payload,
+            "rows_payload": resolved_rows_payload,
+            "replace_by_field": self._string_value(target, "replace_by_field"),
+            "replace_by_value": self._resolve_value(self._string_value(target, "replace_by_value"), context),
             "write_options": write_options,
             "trace_id": context.trace_id,
             "risk_level": context.risk_level,
@@ -413,7 +447,34 @@ class ExecutionNodeHandler:
                     return None
                 current = current.get(key)
             return current
+        if root == "sensor_payload":
+            current = cast(JsonValue, context.sensor_payload or {})
+            for key in filter(None, remainder.split(".")):
+                if not isinstance(current, dict):
+                    return None
+                current = current.get(key)
+            return current
+        if root == "event":
+            current = cast(JsonValue, context.event_payload or {})
+            for key in filter(None, remainder.split(".")):
+                if not isinstance(current, dict):
+                    return None
+                current = current.get(key)
+            return current
         return None
+
+    @staticmethod
+    def _render_record_key_template(template: str, context: ExecutionContext) -> str:
+        def replace(match: re.Match[str]) -> str:
+            path = match.group(1).strip()
+            value = ExecutionNodeHandler._resolve_value(path, context)
+            if value is None:
+                return ""
+            return str(value)
+
+        rendered = re.sub(r"\{\{\s*([^{}]+?)\s*\}\}", replace, template)
+        rendered = re.sub(r"[^A-Za-z0-9_.:-]+", "_", rendered).strip("_")
+        return rendered[:64]
 
     def _resolve_target_dept_id(self, target: Mapping[str, object], context: ExecutionContext) -> str:
         route_mode = self._string_value(target, "dept_route_mode") or "current_dept"
@@ -532,6 +593,35 @@ class ExecutionNodeHandler:
             if isinstance(raw_table_write, dict):
                 return cast(dict[str, JsonValue], raw_table_write)
         return {}
+
+    @staticmethod
+    def _extract_table_writes_payload(context: ExecutionContext) -> list[dict[str, JsonValue]]:
+        if isinstance(context.decision_payload, dict):
+            raw_table_writes = context.decision_payload.get("table_writes")
+            if isinstance(raw_table_writes, list):
+                return [cast(dict[str, JsonValue], item) for item in raw_table_writes if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _render_row_record_key_template(template: str, row: Mapping[str, JsonValue]) -> str:
+        def replace(match: re.Match[str]) -> str:
+            path = match.group(1).strip()
+            root, _, remainder = path.partition(".")
+            if root in {"sensor_payload", "decision_payload", "payload"}:
+                current: JsonValue = cast(JsonValue, dict(row))
+                parts = remainder.split(".") if remainder else []
+            else:
+                current = cast(JsonValue, dict(row))
+                parts = path.split(".")
+            for key in filter(None, parts):
+                if not isinstance(current, dict):
+                    return ""
+                current = current.get(key)
+            return "" if current is None else str(current)
+
+        rendered = re.sub(r"\{\{\s*([^{}]+?)\s*\}\}", replace, template)
+        rendered = re.sub(r"[^A-Za-z0-9_.:-]+", "_", rendered).strip("_")
+        return rendered[:64]
 
     @staticmethod
     def _build_chat_summary(context: ExecutionContext) -> str:
