@@ -290,14 +290,25 @@ agent-collab-module/
 - 记录编辑触发的标准事件必须可追踪到最近一次感知链路
 - 该页面不应成为正式员工长期使用入口；正式入口后续由 Go 侧表格能力所在部门接管
 - 右侧最近事件区当前应只保留“已实际触发 workflow”的事件索引，不再展示大量 `触发 execution：无` 的噪声卡片；卡片内容以表名、记录号、触发时间与 execution_id 为主
+- 当前主展示口径已从“库存/工单/设备三张泛测试表”切换到“产品主表 / 产品 BOM / 客户订单 / 零件需求 / 三张部门分发表”的最小业务闭环 demo
+- 当当前表为 `product_master` 时，中间主区应收口为：左侧产品主表，右侧作为“当前产品详情页”承载产品资料与 `product_bom` 嵌套维护区，不再把 BOM 作为脱离产品详情的平行主表
+- 当当前表为 `customer_order` 时，中间主区应收口为：左侧订单表，右侧同时展示 `parts_demand / purchase_request / manufacturing_request / customer_supply_request` 四块拆解结果，便于直接看到“订单 -> 零件需求 -> 部门表单”链路
+- 对于 `parts_demand / purchase_request / manufacturing_request / customer_supply_request` 这类派生表，当前前端以查看为主，不应默认鼓励手工新增；它们的主要来源是订单驱动的自动派生，后续会切到对话型 workflow + 感知型 workflow 驱动
+- workflow 制作区的 `SensorConfigPanel` 当前不再展示“业务表格区临时测试源”及旧三表；感知型配置下拉应只面向新产品/BOM/订单链与实时库目录，不再回退到旧库存 demo 口径
 
-当前已落地的第一批实现：
+当前已落地的实现：
 - 顶部导航已新增 `业务表格区`
 - `router/agentCollab.ts` 已注册 `/records-workbench`
 - `RecordsWorkbenchPage.vue` 已实现首版三栏布局：左侧选表、中间真实表格、右侧最近事件流
 - `api/records.ts` 与 `store/records.ts` 已落地，支持表列表、schema、行列表、创建、编辑、删除、最近事件刷新
 - 右侧 `Recent Trigger Stream` 当前只保留为最近事件索引区，不再承担 execution 详情查看职责
 - 当前页面仍是单文件集成实现，`components/records/*` 目录尚未拆出；后续若继续演进再做组件细分
+- `RecordsWorkbenchPage.vue` 当前已进一步改造成最小业务闭环视图：
+  - 产品主表与产品 BOM 为主从联动视图
+  - 客户订单与零件需求/部门分发表为订单拆解视图
+  - 编辑器仍复用 schema 驱动方式，不为每张表单独创建硬编码表单组件
+  - 当前产品页已进一步收口：左侧选产品，右侧直接维护当前产品详情与当前产品 BOM；顶部“新增 BOM”在未选产品时默认禁用，避免出现脱离产品的孤立 BOM 记录
+  - `product_bom` 编辑弹窗中的 `source_type / source_ref` 当前已收口为受控下拉：`source_type` 只能选择 `purchase / manufacture / customer` 对应的中文选项，`source_ref` 跟随来源类型切换为对应说明选项，避免自由输入脏值导致 `parts_demand` 下游 fan-out workflow 不命中
 
 ## 5. 与后端契约的直接映射
 - `api/workflows.ts` 对接 workflow 草稿/编译/发布/版本接口

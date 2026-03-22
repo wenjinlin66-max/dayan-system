@@ -110,6 +110,18 @@
 - chat route 当前已改为只对 `dialog_trigger` workflow 做正式选流，并消费 registry 的 `summary / synonyms / example_utterances / allowed_roles / required_inputs / input_schema`；目录展示与目录直接启动也已同步按 `allowed_roles` 收口，不再把事件/定时流程混进对话直接启动目录
 - 对话区本轮继续收尾并补齐多项明确问题：chat 主链时间展示当前统一走 `utils/dateTime.ts` 并固定按 `Asia/Shanghai` 输出；workflow 历史接口已支持 `include_all + dept_id` 组合，对话区与查看区的历史口径已对齐；dialog-trigger workflow 发布时会先失活旧 registry 条目，chat route / chat start / 候选按钮渲染都已补 workflow 去重；chat send/start 请求已单独放宽到 60s timeout；执行结果当前会补发到同部门所有“当前部门主对话框”会话
 - 对话工作台当前布局已收口为“左侧身份/会话、中间 AI 主对话区、右侧部门流程目录 + 中心工作台”，其中中心工作台只承接审批任务与执行结果查看，不再作为 workflow 启动主入口
+- 业务表格区本轮已按最小业务闭环 demo 改造成新表系：`product_master / product_bom / customer_order / parts_demand / purchase_request / manufacturing_request / customer_supply_request` 已落地；前端主视图已支持“产品主表 + 产品 BOM”主从查看，以及“客户订单 -> 零件需求 -> 三张部门分发表”拆解查看
+- `customer_order -> parts_demand -> 三张部门表` 这条链本轮已完整 workflow 化：startup 自动确保 `customer-order-parts-demand-projection` 存在，链路二当前走 `sensor_agent(customer_order) -> decision_agent(parts_demand_projection) -> execution_agent(replace_rows -> parts_demand)`；链路三继续由三条 released fan-out workflow 下发 `purchase_request / manufacturing_request / customer_supply_request`
+- 三条 fan-out workflow 之前“执行失败，未完成预期写入”的直接根因已修：workflow 内部写表当前可绕过前端 `editable=False` 限制，因此下游三张部门表已能被 execution 正常写入
+- 当前新增订单主链已验证通过：创建 `customer_order` 后可自动生成 3 条 `parts_demand` 并继续落入三张部门表；但订单更新链路的同步请求仍偏长，后续可继续优化为更轻的后台执行/提交策略
+- `execution_agent` 当前已支持在 `row_mapping` 中直接读取 `sensor_payload.*`；因此三条 fan-out 流程当前采用最小 DAG `sensor_agent(parts_demand) -> execution_agent(department_table)`，无需额外 decision 节点也能完成结构化写表
+- 已定位并修复“运行成功但制作区仍显示 inventory_stock”的版本错位：前端工作流制作区会优先加载最新 draft，而 runtime 一直执行 current release；本轮已将 startup seed 调整为“同时确保 release 与 draft 都同步到同一份 `parts_demand` 配置”，因此制作区与运行时感知源现在应保持一致
+- 旧三表清理本轮已完成：`inventory_stock / production_order / device_status` 已从感知元数据目录、前端旧默认值、mock records ORM/seed、主库旧 workflow 污染资产和 `dayan_mock_records` 实库中整体删除；当前 `sensor-metadata` 的 form-change 下拉只保留新链条表与 `postgres_live/erp_prod`
+- 已定位并修复一次“业务表格区仍显示旧表”的环境命中问题：根因不是 mock 库/主库建错，而是浏览器命中了旧的 5173/5174 前端实例，且旧 5173 默认代理到旧 8000 后端；现已把默认开发口径收回为“5173 新前端 -> 8000 新后端”，`/api/v1/records/tables` 默认返回新表集合
+- 对话型订单录入主链本轮已落地：startup 自动确保 released workflow `dialog-sales-order-intake` 存在；供应链账号在 chat 里发送销售订单文本后，后端会先抽取 `order_no / customer_name / product_code / product_name / ordered_qty / unit_price`，缺字段时通过现有参数补齐卡片追问，补齐后写入 `customer_order`，并继续重建 `parts_demand`
+- `parts-demand-customer-fanout` 当前已按用户要求从 `customer_service` 归属调整为 `supply_chain`；采购与客户提供两条下发表单 workflow 当前都归供应链侧统一查看与跟进
+- RecordsWorkbench 的产品区当前已进一步收口为“左侧选产品，右侧维护当前产品详情 + 当前产品 BOM”的嵌套编辑页口径，顶部未选产品时禁用“新增 BOM”，避免生成孤立 BOM
+- 已修复产品 BOM 来源类型脏值问题：`RecordsWorkbenchPage.vue` 中 `product_bom.source_type / source_ref` 当前改为受控选择，`records_service.py` 会把“采购/生产/客户提供”等中文输入归一化为 `purchase / manufacture / customer`；同时服务层兜底回算与 projection workflow 的 BOM 拆解读取侧也已补同口径归一化，避免历史脏值继续让 `parts_demand.source_type` 失真并导致三条 fan-out workflow 不命中；当前 mock 库中遗留的旧中文 BOM 类型与受影响订单投影也已完成定点清理/重建
 
 ## 进行中模块
 - 感知型智能体详细设计（数据库实时感知优先）
@@ -124,6 +136,8 @@
 - 执行型 chat-only / result_template / failure_delivery 细节当前已落到运行态与配置面板，但失败态模板与更多第三方目标（feishu/email/mcp）仍待继续扩展
 - 监控型智能体详细设计（独立监控工作台、非画布节点）
 - 独立 Mock 业务库与临时业务表格测试工作台详细设计
+- 对话型 workflow 把订单解析后直接写入 `parts_demand`，进一步替换当前“对话录单 -> customer_order -> projection workflow”的两段式入口
+- 对话型订单录入 workflow 的字段抽取继续增强（当前已能抽订单号/客户/产品/数量/单价，但仍可继续增强更复杂中文订单语句与价格格式）
 - 控制节点详细设计（定义先行，开发后置）
 - workflow 部门化与执行历史查看能力已进入“功能完成，等待权限/分页/竞态等加固”阶段
 - 本地运行环境治理（旧监听、端口冲突、热重载不一致）仍待继续收口
@@ -133,12 +147,13 @@
 - 浏览器开发态页面当前已能打开 `chat-workbench` 并发送消息；由于 8000 旧监听仍未清理，后续若恢复默认代理口径前仍建议继续使用 8001 干净实例做 relay 联调
 - workflow 历史弹窗的信息密度已进一步提升，但当前仍以单条摘要为主；若后续要支持复杂多节点执行结果逐项展开，可能需要继续拆明细弹层或折叠区
 - 决策型 llm 节点当前仍可能耗时 10~20 秒才进入 execution，这属于真实网关延迟而非“停死”；当前画布与 execution 查询应继续以 `running -> decision -> execution -> finished` 的渐进过程解释给配置员
-- 感知来源元数据当前已新增 `dayan_mock_records` 选项，用于在制作区明确表示“业务表格区临时测试源”；但为兼容旧流程，运行时仍保留 `erp_prod` 与 `dayan_mock_records` 的双向兼容判断
+- 运行时当前仍保留 `erp_prod <-> dayan_mock_records` 双向兼容判断，作为底层历史事件别名兜底；但前端感知配置目录已删除 `dayan_mock_records` 临时测试源，不再允许配置员继续基于旧三表创建新流程
 - 事件触发型流程当前即使不是从 chat 发起，只要执行节点选择“结果回传 = 对话区”，也能把 finished / failed 等 execution 结果投递到部门对话区；当前默认投递到“当前用户 + 目标部门”的最新主会话
 - CEO 当前可以查看全部门会话、跨部门 workflow 目录与审批待办，也可以读取指定部门会话消息；但“全部门总览”仍属于同一路由内的 scope 切换，不是独立的 CEO 专属新页面
 - 这套登录模型目前仍是“静态原型账号 + 签名 token”，还不是企业级用户表 / 密码哈希 / 刷新 token / SSO；但已经从“纯 header 模拟”升级为真正的认证上下文
 - 当前 `workflow canvas` / `chat workbench` / `execution stream` 都已进入 bearer 认证口径；若后续再出现 404，优先排查旧前端页面缓存或旧后端实例未重启，而不是先怀疑 CEO 单部门 scope 逻辑
 - 当前对话区若出现“时间不显示 / CEO 写操作 404”，应优先排查是否仍在使用旧 bundle 或旧后端实例，而不是先怀疑消息模型或 session 数据本身缺失
+- 当前若发现 dialog 订单录入与 records 手工录单对同一 `order_no` 产生重复/冲突，应优先检查是否存在历史随机 id 旧数据；本轮已为 `customer_order` mock upsert 补 `order_no` 级别兼容更新逻辑。projection workflow 当前已支持 delete 语义清理，但 `product_bom` 变更仍保留 service 兜底回算，后续可继续统一到 workflow
 
 ## 未开始模块
 - 感知型智能体 Go 事件接入实现
@@ -159,6 +174,7 @@
 ## 阻塞项
 - Go 侧事件 envelope 最终字段与投递格式尚未完全联调
 - 本机 8000 端口当前存在异常旧监听残留，导致最新 workflow 部门化 HTTP 行为无法稳定只命中新实例；干净 8001 实例已验证代码正确，但默认开发端口环境仍待清理
+- 若业务表格区再次出现“页面壳是新的，但表列表还是旧的”这种混合状态，应优先排查 5173/5174/8000 是否又被旧 dev 进程占住；当前这类现象已验证属于实例命中问题，而不是 mock 库和 Python 主库混淆
 
 ## 风险项
 - 感知型节点前端配置过复杂，可能影响 M2 交付节奏
@@ -186,6 +202,7 @@
 - 基于已落地的 `result_target_dept_id + result_template + chat_delivery` 口径，继续扩展失败态报告、结构化卡片与更多执行目标（feishu/email/mcp）
 - 继续把 `parallel` 节点补成更完整的并行控制节点，并让画布侧显式暴露 `parallel` 入口与 join 口径
 - 为业务表格被动触发补更明确的运行日志/命中解释，方便直接看出是“未命中条件”还是“无发布版”还是“执行启动失败”
+- 继续把上游入口从 `customer_order` 切到对话型 workflow：让对话区解析订单信息后直接写 `parts_demand`，复用本轮已落地的三条 fan-out workflow 下发部门表单
 - 为 workflow 执行历史接口补分页或至少显式截断元信息，并补前端请求竞态保护
 - 清理本机默认开发端口 8000 的异常旧监听，恢复“代码与 HTTP 行为一致”的单实例环境
 - 为 dialog-trigger workflow 增加更严格的输入值 / schema 校验与默认值防呆，避免 `unknown-item`、默认数量等兜底结果继续写入业务表格
@@ -205,4 +222,6 @@
 - 本轮已重点复核并再次同步：`workflow-dsl.md`（补 execution_agent chat-only / result_template 口径）、`langgraph-runtime.md`（补 execution_agent chat-delivery runtime 行为）、`frontend-code-structure.md`（补执行型面板 chat-only 交互）、`progress-tracker.md`（补当前完成状态）、`change-log.md`（补本轮实现留痕）
 - 本轮已补同步：`workflow-dsl.md`（补 `dialog_agent.config` 承载对话触发规则的口径）、`frontend-code-structure.md`（补对话触发配置收口到节点面板）、`python-service-api.md`（补 publish 从 `dialog_agent.config` 抽取 registry 元数据）、`api-event-contracts.md`（补 dialog_trigger registry 检索与 `allowed_roles` 过滤约束）、`progress-tracker.md`、`change-log.md`
 - 本轮已补同步：`frontend-code-structure.md`（补中心工作台位置、流程目录总览弹窗、Chat 时间工具与 AttachmentPanel 删除口径）、`python-service-api.md`（补 Auth API、chat session delete、history scope、60s timeout 与 registry 去重口径）、`api-event-contracts.md`（补 chat delete、scope、缺参优先规则与旧 registry 失活约束）、`langgraph-runtime.md`（补执行结果多主会话回传）、`workflow-dsl.md`（补 dialog-trigger 发布失活旧 registry 条目）、`implementation-plan.md`、`progress-tracker.md`、`change-log.md`
+- 本轮已补同步：`mock-records-architecture.md`（补产品/BOM/订单/零件需求/部门分发表口径）、`frontend-code-structure.md`（补业务表格区主从/拆解视图）、`python-service-api.md`（补 records 内置订单派生链与新 sensor metadata 来源表）、`progress-tracker.md`、`change-log.md`
+- 本轮已补同步：`mock-records-architecture.md`（补 single-writer 与三条 fan-out workflow 口径）、`python-service-api.md`（补 startup seed 的 released workflow）、`langgraph-runtime.md`（补 execution row_mapping 直接消费 `sensor_payload.*`）、`workflow-dsl.md`（补 `sensor_agent -> execution_agent` 写表示例）、`implementation-plan.md`、`progress-tracker.md`、`change-log.md`
 - 其余已在前几轮同步过且本轮未发生事实变化的 references，本轮不再重复改写

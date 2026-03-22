@@ -10,7 +10,7 @@
 - 该数据库与 Python AI 中枢主库 `dayan_agentic2` **完全分离**
 - Python 服务同时维护两类数据库边界：
   1. **主库**：`dayan_agentic2`，承载 workflow / execution / chat / approval / memory / audit 真相数据
-  2. **Mock 业务库**：`dayan_mock_records`，承载用于前端展示与联调的业务表（如 `inventory_stock` / `production_order` / `device_status`）
+  2. **Mock 业务库**：`dayan_mock_records`，承载用于前端展示与联调的业务表；当前主展示口径已切到 `product_master / product_bom / customer_order / parts_demand / purchase_request / manufacturing_request / customer_supply_request`
 
 ## 3. 为什么必须单独数据库
 - 避免把 mock 业务表混入 Python 主库 schema，降低后续清理成本
@@ -46,10 +46,13 @@
 - 业务表格区是**测试/联调工作区**，不是未来正式产品长期保留页面
 - Go 端正式业务表格与 records API 接入后，该页面应整体删除或下线，不作为正式员工工作台保留
 
-第一阶段页面结构建议：
-- 左侧：数据源 / 表选择区
-- 中间：真实表格展示区（支持分页、筛选、编辑弹窗）
-- 右侧：最近一次事件、感知命中结果、触发的 workflow、执行回写摘要
+当前阶段页面结构口径：
+- 左侧：业务表导航区
+- 中间：按当前表切换的主工作区
+  - `product_master`：左侧产品主表，右侧收口为“当前产品详情 + 当前产品 BOM”嵌套维护区
+  - `customer_order`：左侧订单表，右侧展示 `parts_demand / purchase_request / manufacturing_request / customer_supply_request` 的拆解结果
+  - 其余派生表：保留通用表格查看区
+- 右侧：仅保留“已触发 workflow”的最近事件索引
 
 ## 5. 代码结构隔离方案
 
@@ -110,11 +113,16 @@ src/
 
 ### 6.2 Mock 业务库（新增）
 - 数据库名：`dayan_mock_records`
-- 第一阶段建议表：
-  - `inventory_stock`
-  - `production_order`
-  - `device_status`
-  - `sensor_change_log`（可选，用于记录 UI 改表触发的标准事件）
+- 当前主展示表：
+  - `product_master`：产品主表
+  - `product_bom`：产品 BOM 关联表
+  - `customer_order`：客户订单表
+  - `parts_demand`：订单拆解后的零件需求表
+  - `purchase_request`：销售/采购部表单
+  - `manufacturing_request`：生产部表单
+- `customer_supply_request`：客户配合表单
+- `sensor_change_log`：记录 UI 改表触发的标准事件
+- 旧的 `inventory_stock / production_order / device_status` 当前已从 mock records 代码、感知元数据目录与 `dayan_mock_records` 实库中整体删除，不再保留兼容入口
 
 ### 6.3 关键原则
 - Mock 业务库中的表结构应面向“业务字段 + 感知触发”设计，而不是完全复制 Python 主库结构
@@ -138,6 +146,11 @@ src/
 - 业务表格区的**被动事件触发不按当前登录账号部门过滤 workflow**；它应扫描所有已发布 workflow，只要 `sensor_agent` 的来源/表/事件键/条件命中就启动 execution
 - 被动触发时，execution 的 `dept_id` 取命中 workflow 的 `owner_dept_id`，从而把执行结果、审批与对话框报告投递回对应部门，而不是投递到“当前修改数据的人”的部门
 - CEO / 部门账号的差异只体现在“主动查看哪些对话框、主动启动哪些 workflow”的可见性与权限；业务表格的被动触发本身不应因为登录者是 CEO 还是部门账号而改变命中范围
+- 当前最小闭环 demo 已收口为：`customer_order` 只负责按 `product_bom` 重算 `parts_demand`；采购/生产/客户配合三张部门表不再由 mock records 内置双写，而是交给三条已发布的 `parts_demand` 感知型 workflow 自动下发
+- 当前最小闭环 demo 已进一步 workflow 化：`customer_order` 写入后不再直接由 service 生成 `parts_demand`，而是交给 released projection workflow `customer-order-parts-demand-projection` 完成订单拆解；service 仅保留 `product_bom` 变更后的兜底回算
+- 过渡期必须遵守**单写入者**约束：当前三张部门分发表的唯一写入者应是 workflow；`records_service.py` 不再直接生成 `purchase_request / manufacturing_request / customer_supply_request`
+- 对话区当前还额外存在一条上游入口：released dialog workflow `dialog-sales-order-intake` 可在 chat 中解析销售订单文本，缺字段时回退到参数补齐卡片，补齐后写入 `customer_order`；该写入已接回 `records_service.py` 主链，因此会继续派生 `parts_demand` 并触发三条下游感知 workflow
+- `product_bom.source_type` 当前必须落成 runtime 可识别的标准值 `purchase / manufacture / customer`；前端业务表格区已将 `source_type / source_ref` 收口为受控下拉，后端 `records_service.py` 会在写入时把中文别名归一化到上述标准值；同时服务层兜底回算与 projection workflow 的 BOM 拆解读取侧也会再次归一化，避免历史脏值继续导致 `parts_demand` 拆解后无法命中三条 fan-out workflow。当前 mock 库里遗留的旧中文 `source_type` 行也已完成清理，现库内仅保留 canonical 值
 
 ### 7.2 必须保持的正式契约口径
 - 事件信封结构继续沿用 Dayan `api-event-contracts.md`
@@ -215,9 +228,15 @@ src/
 - 所有 mock 数据库相关信息统一沉淀在本文件
 - 后续接 Go 正式后端时，`dayan_mock_records`、`业务表格区`、`app/mock_records/` 都按临时测试层整体删除
 
-## 13. 当前已实现的第一批能力
+## 13. 当前已实现的能力
 - 后端已新增 `GET/POST/PUT/DELETE /api/v1/records/*` 临时测试 API
 - 后端已新增独立 Mock Records session，连接 `dayan_mock_records`
-- 服务启动时会自动确保 `dayan_mock_records` 存在，并创建三张测试业务表与首批种子数据
+- 服务启动时会自动确保 `dayan_mock_records` 存在，并创建当前产品/BOM/订单/需求/部门分发表与首批种子数据
 - 记录修改会写入 `sensor_change_log` 并尝试触发匹配的已发布 workflow execution
-- 前端已新增 `RecordsWorkbenchPage.vue` 与顶部导航入口，可直接查看/编辑三张测试业务表并查看最近事件流
+- 前端已新增 `RecordsWorkbenchPage.vue` 与顶部导航入口，当前以“产品主表 + 产品 BOM + 客户订单拆解结果”作为业务表格区主视图
+- `customer_order` 当前在 mock records 层只自动派生 `parts_demand`
+- 主库 startup 当前会自动确保三条 released sensor workflow 存在：
+  - `parts-demand-purchase-fanout`
+  - `parts-demand-manufacturing-fanout`
+  - `parts-demand-customer-fanout`
+- 这三条 workflow 当前统一监听 `parts_demand` 的 `record.created` 事件，并分别按 `source_type=purchase / manufacture / customer` 写入 `purchase_request / manufacturing_request / customer_supply_request`

@@ -200,6 +200,7 @@ Python 服务对外提供 5 类能力：
 - 新增 `GET /api/v1/workflows/sensor-metadata`
 - 该接口返回：来源类型、来源系统、表/数据域、事件键、字段、支持的比较操作符
 - 前端 `SensorConfigPanel` 当前应默认基于该接口渲染来源选择与结构化条件配置，不再要求配置员手写整段条件文本
+- 当前 `form_change` 来源目录已收口为：`erp_prod + postgres_live`；此前的 `dayan_mock_records` 临时测试源已删除，不再出现在前端感知配置下拉中
 
 ### 8.3 Mock Event Injector 当前行为
 - 新增 `POST /api/v1/executions/inject/mock-event`
@@ -211,10 +212,23 @@ Python 服务对外提供 5 类能力：
 
 ### 8.4 Mock Records 临时测试层当前行为
 - 服务启动时会优先确保独立数据库 `dayan_mock_records` 存在；若数据库不存在且账号具备权限，则自动创建
-- 服务启动后会初始化三张测试业务表并补充首批种子数据：`inventory_stock / production_order / device_status`
+- 服务启动后会初始化当前最小闭环 demo 所需表并补充首批种子数据：`product_master / product_bom / customer_order / parts_demand / purchase_request / manufacturing_request / customer_supply_request`
+- startup 当前还会主动清理旧三表：`inventory_stock / production_order / device_status`，包括删除 `sensor_change_log` 中相关旧事件，并从 `dayan_mock_records` 实库物理 drop 这三张表
 - `records` API 当前支持：表列表、schema、行列表、创建、更新、删除、最近事件
 - 当前记录修改会写入 `sensor_change_log`，并基于 `source_system=dayan_mock_records + table_name + event_type` 匹配已发布 workflow 中的 `sensor_agent`
 - 若命中 workflow，会直接通过 `ExecutionService.start()` 触发 execution，并把 execution_id 回写到最近事件流中
+- `customer_order` 当前已从 `records_service.py` 内置投影切到 workflow 化：订单新增/更新后，由 released workflow `customer-order-parts-demand-projection` 调用决策型智能体按 `product_bom` 展开零件需求，再通过 `replace_rows -> parts_demand` 重建需求表
+- `product_bom` 当前变更后也会回溯重算引用该产品的订单拆解结果，保证产品 BOM 与派生需求表保持一致
+- `GET /api/v1/workflows/sensor-metadata` 当前已把 `parts_demand / purchase_request / manufacturing_request / customer_supply_request / product_master / product_bom / customer_order` 暴露在 `erp_prod` 的感知目录下；旧三表与临时测试源入口已删除
+- `customer_order` 当前已进一步收口：订单写入后不再由 service 直接硬编码生成 `parts_demand`；链路二已切给 projection workflow；下游三张部门表继续由 released workflow 自动写入
+- 服务 startup 当前会自动确保四条 `event_trigger` workflow 存在并处于 released：`customer-order-parts-demand-projection`、`parts-demand-purchase-fanout`、`parts-demand-manufacturing-fanout`、`parts-demand-customer-fanout`
+- `customer-order-parts-demand-projection` 当前监听 `customer_order` 记录变更，使用 `decision_agent(rule_set_ref=parts_demand_projection)` 生成多条 `parts_demand` 写入意图，再通过 `execution_agent(operation=replace_rows)` 重建需求表
+- 这三条 workflow 当前统一监听 `parts_demand` 的 `record.created`，并通过 `execution_agent -> department_table` 分别写入 `purchase_request / manufacturing_request / customer_supply_request`
+- 三条 fan-out workflow 之前失败的直接根因已修：workflow 内部写表当前可绕过前端 `editable=False` 限制，因此 `purchase_request / manufacturing_request / customer_supply_request` 现可由 execution 正常写入
+- 三条 `parts_demand` fan-out workflow 当前所属部门口径为：采购 + 客户提供都归 `supply_chain`，生产归 `production`；客户提供表单仍写入 `customer_supply_request`，但 workflow 归属与执行结果查看由供应链侧统筹
+- 服务 startup 当前还会自动确保一条 released `dialog_trigger` workflow 存在：`dialog-sales-order-intake`
+- `dialog-sales-order-intake` 当前走：chat 文本 -> 后端抽取订单字段 -> 若缺字段则返回 `missing_inputs + suggested_input_values` -> 参数补齐后写入 `customer_order`
+- chat 订单录入当前写表不再走低层 mock gateway 直写；mock `department_table` 写入已接回 `MockRecordsService` 主链，因此 `customer_order` 通过 chat 写入后也会自动计算 `total_amount`、重建 `parts_demand` 并触发下游 fan-out workflow
 - 该层属于临时测试设施；Go 正式 records 能力接入后应整体删除
 
 ## 9. Approval API 当前行为

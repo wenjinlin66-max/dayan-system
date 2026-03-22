@@ -318,13 +318,17 @@
 `department_table` 目标推荐配置字段：
 - `target_ref`：执行目标注册表中的目标编码
 - `provider`：底层表格提供方，如 `bitable | spreadsheet | custom_table`
-- `operation`：`append_row | upsert_row | update_row`
+- `operation`：`append_row | upsert_row | update_row | append_rows | upsert_rows | replace_rows`
 - `sheet_locator`：表格/数据表定位信息
 - `dept_route_mode`：`current_dept | fixed_dept | derived`
 - `row_mapping`：字段映射规则
 - `default_values`：缺省值注入
 - `idempotency_key_template`：防重复写入模板
 - `write_result_contract`：写入后回传结构
+- `row_mapping` 当前除 `decision_payload.* / dept_id / risk_level` 外，还可直接使用 `sensor_payload.*` 与 `event.*`；因此 `sensor_agent -> execution_agent` 型事件流程已经可以直接把感知结果写入下游表
+- 批量写表时，`execution_agent` 当前还支持：
+  - `rows_payload`：多行结构化记录数组
+  - `replace_by_field` / `replace_by_value`：用于 `replace_rows` 先删旧再重建
 
 执行型节点当前补充口径：
 - `target_type=department_chat` 表示该 execution 节点的主目标就是“把决策结果发送到目标部门对话框”，不是结果回传的副作用
@@ -372,6 +376,63 @@
     "approval_mode": "risk_based",
     "approval_required": true,
     "result_delivery": "chat"
+  }
+}
+```
+
+`parts_demand` 下发表单当前最小示例：
+```json
+{
+  "id": "execution_purchase_request",
+  "type": "execution_agent",
+  "name": "采购表单下发",
+  "config": {
+    "approval_required": false,
+    "approval_mode": "never",
+    "execution_target_mode": "manual",
+    "execution_targets": [
+      {
+        "target_type": "department_table",
+        "target_ref": "purchase_request",
+        "provider": "custom_table",
+        "operation": "append_row",
+        "row_mapping": {
+          "order_no": "sensor_payload.order_no",
+          "product_code": "sensor_payload.product_code",
+          "part_code": "sensor_payload.part_code",
+          "part_name": "sensor_payload.part_name",
+          "request_qty": "sensor_payload.purchase_qty",
+          "estimated_cost": "sensor_payload.total_cost"
+        },
+        "default_values": {
+          "supplier_hint": "待采购/销售确认供应来源",
+          "request_status": "pending"
+        }
+      }
+    ]
+  }
+}
+```
+
+链路二 projection workflow 当前最小示例：
+```json
+{
+  "id": "execution_parts_demand",
+  "type": "execution_agent",
+  "name": "重建零件需求表",
+  "config": {
+    "execution_target_mode": "manual",
+    "execution_targets": [
+      {
+        "target_type": "department_table",
+        "target_ref": "parts_demand",
+        "provider": "custom_table",
+        "operation": "replace_rows",
+        "replace_by_field": "order_no",
+        "replace_by_value": "decision_payload.replace_by.value",
+        "record_key_template": "{{payload.order_no}}:{{payload.part_code}}:{{payload.source_type}}"
+      }
+    ]
   }
 }
 ```

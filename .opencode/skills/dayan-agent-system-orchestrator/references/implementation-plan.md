@@ -269,6 +269,7 @@
 ## 当前收尾优先级（2026-03-19）
 - 在不新增大功能的前提下，优先完成“对话工作台最近修复 → references 同步 → 下一步上下文 → GitHub 同步”的第二轮收尾闭环
 - M3/M4 当前近端优先级收口为：
+  0. 先用 Mock Records 跑通“产品主表 -> 产品 BOM -> 客户订单 -> 零件需求 -> 三张部门分发表”的最小业务闭环 demo；当前已完成“链路二 workflow 化 + 三条 released sensor workflow 下发表单”这一收口：`customer_order` 先触发 projection workflow 重建 `parts_demand`，再由三条 fan-out workflow 下发部门表；下一步再把最上游切到“对话型 workflow 直接写 `parts_demand`”
   1. dialog-trigger workflow 的发布/选流/启动链路继续收紧输入值校验，避免默认兜底值（如 `unknown-item`）继续写入业务表格
   2. workflow 历史查询、chat scope、CEO 聚焦部门口径继续统一，避免“查看区有、对话区没有”这类范围不一致
   3. chat 主链外的历史弹窗、records 时间展示继续统一到 `Asia/Shanghai` 时间工具
